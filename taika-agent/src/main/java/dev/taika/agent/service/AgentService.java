@@ -62,8 +62,9 @@ public class AgentService {
         // 3. Execution Loop (simplified to a single call for this implementation)
         logger.info("Calling AI model with assembled prompt and tools...");
         String responseContent = chatClientBuilder.build()
-                .prompt(new Prompt(java.util.List.of(systemMessage, userMessage)))
-                // Spring AI will automatically discover the Function beans from ToolConfiguration
+                .prompt()
+                .messages(systemMessage, userMessage)
+                .tools("fileSystemReader", "fileSystemWriter", "mavenExecutor", "fileReader")
                 .call()
                 .content();
 

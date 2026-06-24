@@ -14,10 +14,10 @@ This module handles low-level Linux OS capabilities. It acts as the "hands" of t
 ### Core Service Components
 The following Spring `@Service` components must be implemented to provide the physical "hands" for the AI agents:
 
-*   **`MavenExecutor`**: Executes Maven commands (e.g., `mvn clean install`) within a specified project directory (`Path`). It must capture and return the raw `stdout` and `stderr` streams as a clean `String` for AI analysis, mimicking a terminal's copy-paste output.
+*   **`MavenExecutor`**: Executes Maven commands. Takes an `ExecuteRequest` DTO containing the project path and goals. It captures and returns the raw `stdout` and `stderr` streams as a clean `String`.
 
-*   **`FileSystemReader`**: Recursively scans a given directory (`Path`) to find all files matching specific patterns (e.g., `*.java`, `context.md`, `api.md`). It must read the content of these files and return them, for instance, as a `Map<Path, String>` to preserve their locations.
+*   **`FileSystemReader`**: Recursively scans for files. Takes a `ReadRequest` DTO containing the root path and glob patterns. It returns a map of file paths and their content.
 
-*   **`FileSystemWriter`**: Provides functionality to write or overwrite file content at a specified `Path`. This allows AI-generated code changes to be physically saved back to the project structure.
+*   **`FileSystemWriter`**: Writes or overwrites file content. Takes a `WriteRequest` DTO containing the file path and content.
 
-*   **`FileReader`**: Provides a simple service to read the content of a single specified file (e.g., an `.md` file) given its `Path`.
+*   **`FileReader`**: Reads a single file. Takes a `ReadFileRequest` DTO containing the file path.
