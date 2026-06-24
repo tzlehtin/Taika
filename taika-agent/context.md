@@ -15,8 +15,8 @@ The agent engine operates as a stateful, role-based orchestration machine. Inste
 1.  **Task Initiation**: `AgentService` receives an explicit request containing the `projectPath`, target role (`AgentType`), and a `taskDescription`[cite: 3].
 2.  **Context Assembly**: The agent uses `taika-tools` capabilities to read `context.md`, `api.md`, and any existing source or test code within the miniature world[cite: 2].
 3.  **Role Isolation**: The agent loads a specific external template (e.g., `prompts/CODER.txt`) into the Gemini `ChatClient` system block. This isolates the agent's boundaries, strictly defining what it can and cannot modify.
-4.  **Deterministic Function Execution**: The agent calls `taika-tools` beans wrapped as Spring AI `FunctionCallback` objects to apply mutations (code writes, compilation runs, testing)[cite: 2]. This loops until the contract goal is compiled successfully[cite: 2].
+4.  **Deterministic Function Execution**: The `ToolConfiguration` class defines all available `taika-tools` services as standard Spring `Function` beans. The `AgentService` tells the `ChatClient` which tools to use, and Spring AI automatically discovers and executes these beans when requested by the model. This loops until the contract goal is compiled successfully.
 
 ## Core Service Components
 *   **`AgentService`**: The public entry point managing orchestration and prompt routing based on the API[cite: 2, 3].
-*   **`ToolRegistry`**: Converts low-level native OS tools from `taika-tools` into Spring AI-compatible function schemas[cite: 2].
+*   **`ToolConfiguration`**: Defines all available tools as Spring `Function` beans, each with a clear description for the AI model.
