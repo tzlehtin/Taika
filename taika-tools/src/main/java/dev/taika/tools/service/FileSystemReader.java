@@ -31,13 +31,17 @@ public class FileSystemReader {
                     .filter(matcher::matches)
                     .collect(Collectors.toMap(
                             path -> path,
-                            path -> {
-                                try {
-                                    return Files.readString(path);
-                                } catch (IOException e) {
-                                    throw new RuntimeException("Failed to read file: " + path, e);
-                                }
-                            }));
+                            this::readFileContent
+                    ));
+        }
+    }
+
+    // Extracted for better testability
+    String readFileContent(Path path) {
+        try {
+            return Files.readString(path);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read file: " + path, e);
         }
     }
 }
