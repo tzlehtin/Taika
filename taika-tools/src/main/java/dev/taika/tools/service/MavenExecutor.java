@@ -1,5 +1,6 @@
 package dev.taika.tools.service;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -38,16 +39,20 @@ public class MavenExecutor {
         this(timeout, unit, ProcessBuilder::new);
     }
 
+    public record ExecuteRequest(
+            @JsonProperty(required = true, value = "projectPath") String projectPath,
+            @JsonProperty(required = true, value = "goals") String[] goals
+    ) {}
+
     /**
      * Executes Maven commands in a specified project directory.
      *
-     * @param projectPath The path to the project directory where the command will be run.
-     * @param goals The Maven goals to execute (e.g., "clean", "install").
+     * @param request The DTO containing the project path and Maven goals.
      * @return The combined stdout and stderr from the process, mimicking terminal output.
      * @throws IOException If an I/O error occurs.
      * @throws InterruptedException If the current thread is interrupted while waiting.
      */
-    public String execute(Path projectPath, String... goals) throws IOException, InterruptedException {
+    public String execute(ExecuteRequest request) throws IOException, InterruptedException {
         ProcessBuilder processBuilder;
         try {
             processBuilder = processBuilderFactory.call();
@@ -55,12 +60,12 @@ public class MavenExecutor {
             throw new IOException("Failed to create ProcessBuilder", e);
         }
 
-        List<String> command = new ArrayList<>(goals.length + 1);
+        List<String> command = new ArrayList<>(request.goals().length + 1);
         command.add("mvn");
-        command.addAll(List.of(goals));
+        command.addAll(List.of(request.goals()));
 
         processBuilder.command(command);
-        processBuilder.directory(projectPath.toFile());
+        processBuilder.directory(Path.of(request.projectPath()).toFile());
         processBuilder.redirectErrorStream(true); // Combine stdout and stderr
 
         Process process = processBuilder.start();
