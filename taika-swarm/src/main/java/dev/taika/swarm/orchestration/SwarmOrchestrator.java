@@ -52,27 +52,36 @@ public class SwarmOrchestrator {
             logger.info("{} agent reported SUCCESS.", nextAgent);
 
             // State transition logic
-            switch (nextAgent) {
-                case CODER:
-                    currentTask = "The code has been written or modified. Write comprehensive JUnit tests to ensure full functionality and code coverage. Run 'mvn test' and ensure it passes.";
-                    nextAgent = AgentType.TESTER;
-                    break;
-                case TESTER:
-                    currentTask = "The code is written and all tests pass. Review the code against the project's context.md and api.md. Ensure the implementation matches the documentation. If it does not, provide a detailed list of changes needed. If it does, write a comprehensive README.md for the project.";
-                    nextAgent = AgentType.VALIDATOR;
-                    break;
-                case VALIDATOR:
-                    // A "SUCCESS" from the VALIDATOR means the task is complete.
-                    // We assume the last step was writing the README.
-                    logger.info("VALIDATOR agent succeeded. Swarm orchestration complete.");
-                    return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), "Orchestration completed successfully by VALIDATOR.");
-                default:
-                    logger.error("Unhandled agent type in orchestration loop: {}", nextAgent);
-                    return new SwarmResult(thread.getId(), SwarmStatus.FAILURE, thread.getHistory(), "Internal orchestration error.");
+            StateTransition transition = getNextState(nextAgent);
+            nextAgent = transition.nextAgent;
+            currentTask = transition.nextTask;
+
+            if (nextAgent == null) { // Completion condition
+                logger.info("VALIDATOR agent succeeded. Swarm orchestration complete.");
+                return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), "Orchestration completed successfully by VALIDATOR.");
             }
         }
 
         logger.warn("Orchestration failed after reaching max iterations ({})", MAX_ITERATIONS);
         return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Orchestration failed to complete within the maximum number of iterations.");
+    }
+
+    protected static class StateTransition {
+        final AgentType nextAgent;
+        final String nextTask;
+        StateTransition(AgentType nextAgent, String nextTask) { this.nextAgent = nextAgent; this.nextTask = nextTask; }
+    }
+
+    protected StateTransition getNextState(AgentType currentAgent) {
+        switch (currentAgent) {
+            case CODER:
+                return new StateTransition(AgentType.TESTER, "The code has been written or modified. Write comprehensive JUnit tests to ensure full functionality and code coverage. Run 'mvn test' and ensure it passes.");
+            case TESTER:
+                return new StateTransition(AgentType.VALIDATOR, "The code is written and all tests pass. Review the code against the project's context.md and api.md. Ensure the implementation matches the documentation. If it does not, provide a detailed list of changes needed. If it does, write a comprehensive README.md for the project.");
+            case VALIDATOR:
+                return new StateTransition(null, "Task complete."); // null indicates completion
+            default:
+                throw new IllegalStateException("Unhandled agent type in state transition: " + currentAgent);
+        }
     }
 }
