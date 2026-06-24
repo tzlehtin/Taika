@@ -19,3 +19,9 @@ Writes or overwrites content to a file, creating parent directories if they don'
 * **Method:** `public void write(Path filePath, String content)`
   * **Input:** The absolute path of the file to be written (`filePath`) and the `String` content to write.
   * **Output:** `void`.
+
+## Component: FileReader
+Reads the content of a single file from a given path.
+* **Method:** `public String readFile(Path filePath)`
+  * **Input:** The absolute path of the file to be read (`filePath`).
+  * **Output:** The file's content as a `String`.
