@@ -16,6 +16,6 @@ The following Spring `@Service` components must be implemented to provide the ph
 
 *   **`MavenExecutor`**: Executes Maven commands (e.g., `mvn clean install`) within a specified project directory (`Path`). It must capture and return the raw `stdout` and `stderr` streams as a clean `String` for AI analysis, mimicking a terminal's copy-paste output.
 
-*   **`FileSystemReader`**: Recursively scans a given directory (`Path`) to find all files matching specific patterns (e.g., `*.java`, `context.md`). It must read the content of these files and return them, for instance, as a `Map<Path, String>` to preserve their locations.
+*   **`FileSystemReader`**: Recursively scans a given directory (`Path`) to find all files matching specific patterns (e.g., `*.java`, `context.md`, `api.md`). It must read the content of these files and return them, for instance, as a `Map<Path, String>` to preserve their locations.
 
 *   **`FileSystemWriter`**: Provides functionality to write or overwrite file content at a specified `Path`. This allows AI-generated code changes to be physically saved back to the project structure.
