@@ -27,3 +27,23 @@ The project is split into 5 strictly decoupled sub-modules. Click on any module 
 To verify and compile the entire deterministic multi-module setup, run:
 ```bash
 mvn clean install -U
+```
+
+### How to Run
+
+1.  **Authenticate with Google Cloud**: Before running the application, you must authenticate your local environment to use Google Cloud services. Run the following command and follow the instructions in your browser:
+    ```bash
+    gcloud auth application-default login
+    ```
+
+2.  **Configure Project ID**: Open the `taika-cli/src/main/resources/application.properties` file and replace `your-gcp-project-id` with your actual Google Cloud Project ID.
+
+3.  **Run the Application**: Execute the CLI application from the project root directory:
+    ```bash
+    java -jar taika-cli/target/taika-cli-0.0.1-SNAPSHOT.jar
+    ```
+
+4.  **Execute a Task**: Once the Spring Shell prompt (`shell:>` aukeaa) appears, you can trigger the agent swarm with the `execution` command:
+    ```bash
+    execution --path /path/to/your/target/project --objective "Implement a new REST endpoint that returns a list of users."
+    ```
