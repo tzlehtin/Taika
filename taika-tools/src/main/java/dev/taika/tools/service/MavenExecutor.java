@@ -24,9 +24,9 @@ public class MavenExecutor {
      * @throws InterruptedException If the current thread is interrupted while waiting.
      */
     public String execute(Path projectPath, String... goals) throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>();
-        command.add("mvn");
-        command.addAll(Arrays.asList(goals));
+        List<String> command = new ArrayList<>(goals.length + 1);
+        command.add("mvn"); // Ensure 'mvn' is the first command
+        command.addAll(List.of(goals));
 
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(projectPath.toFile());
