@@ -25,7 +25,8 @@ class FileSystemWriterTest {
         Path newFile = tempDir.resolve("subdir/test.txt");
         String content = "This is a test.";
 
-        fileSystemWriter.write(newFile, content);
+        var request = new FileSystemWriter.WriteRequest(newFile.toString(), content);
+        fileSystemWriter.write(request);
 
         assertTrue(Files.exists(newFile));
         assertEquals(content, Files.readString(newFile));

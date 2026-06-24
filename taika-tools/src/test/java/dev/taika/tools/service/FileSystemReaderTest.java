@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Method;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,14 +40,15 @@ class FileSystemReaderTest {
         Files.createFile(tempDir.resolve("ignored.txt"));
 
         // Execute
-        Map<Path, String> result = fileSystemReader.readAll(tempDir, "*.java", "*.md");
+        var request = new FileSystemReader.ReadRequest(tempDir.toAbsolutePath().toString(), new String[]{"*.java", "*.md"});
+        Map<String, String> result = fileSystemReader.readAll(request);
 
         // Assert
         assertEquals(3, result.size());
-        assertTrue(result.containsKey(javaFile));
-        assertTrue(result.containsKey(mdFile));
-        assertTrue(result.containsKey(contextFile));
-        assertEquals("# API", result.get(mdFile));
+        assertTrue(result.containsKey(javaFile.toAbsolutePath().toString()));
+        assertTrue(result.containsKey(mdFile.toAbsolutePath().toString()));
+        assertTrue(result.containsKey(contextFile.toAbsolutePath().toString()));
+        assertEquals("# API", result.get(mdFile.toAbsolutePath().toString()));
     }
 
     /**
@@ -54,17 +56,26 @@ class FileSystemReaderTest {
      * the IOException is correctly wrapped in a RuntimeException.
      */
     @Test
-    void readFileContent_shouldWrapIOExceptionInRuntimeException(@TempDir Path tempDir) throws IOException {
-        // Setup: Create a directory. Trying to read a directory as a string throws an IOException.
+    void readFileContent_shouldWrapIOExceptionInRuntimeException(@TempDir Path tempDir) throws Exception {
+        // Setup: Create a directory. Trying to read a directory as a file will throw an IOException.
         Path directoryPath = tempDir.resolve("a_directory");
         Files.createDirectory(directoryPath);
 
-        // Execute and assert that the correct exception is thrown
-        RuntimeException exception = assertThrows(RuntimeException.class,
-                () -> fileSystemReader.readFileContent(directoryPath));
+        // Use reflection to make the private method accessible for testing.
+        Method readFileContentMethod = FileSystemReader.class.getDeclaredMethod("readFileContent", Path.class);
+        readFileContentMethod.setAccessible(true);
 
-        // Verify the exception details
-        assertTrue(exception.getMessage().contains("Failed to read file"));
+        // Act & Assert: Invoke the private method and verify that it throws the expected exception.
+        Exception exception = assertThrows(Exception.class, () -> {
+            try {
+                readFileContentMethod.invoke(fileSystemReader, directoryPath);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw (Exception) e.getTargetException(); // Unwrap the actual exception
+            }
+        });
+
+        assertEquals(RuntimeException.class, exception.getClass());
+        assertTrue(exception.getMessage().startsWith("Failed to read file:"));
         assertTrue(exception.getCause() instanceof IOException);
     }
 }

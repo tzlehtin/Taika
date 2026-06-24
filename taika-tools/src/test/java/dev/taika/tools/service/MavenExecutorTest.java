@@ -40,7 +40,8 @@ class MavenExecutorTest {
     @DisplayName("Should execute a command successfully and return its output")
     void shouldExecuteMavenVersionCommand(@TempDir Path tempDir) throws IOException, InterruptedException {
         MavenExecutor mavenExecutor = new MavenExecutor(); // Use real constructor
-        String output = mavenExecutor.execute(tempDir, "--version");
+        var request = new MavenExecutor.ExecuteRequest(tempDir.toString(), new String[]{"--version"});
+        String output = mavenExecutor.execute(request);
 
         assertNotNull(output);
         assertTrue(output.contains("Apache Maven"), "Output should contain 'Apache Maven'");
@@ -62,7 +63,8 @@ class MavenExecutorTest {
         MavenExecutor executor = new MavenExecutor(10, java.util.concurrent.TimeUnit.MILLISECONDS, () -> mockProcessBuilder);
 
         // Act & Assert: Expect the IOException from the reader thread to be re-thrown
-        assertThrows(IOException.class, () -> executor.execute(tempDir, "test"));
+        var request = new MavenExecutor.ExecuteRequest(tempDir.toString(), new String[]{"test"});
+        assertThrows(IOException.class, () -> executor.execute(request));
     }
 
     @Test
@@ -75,7 +77,8 @@ class MavenExecutorTest {
         });
 
         // Act & Assert
-        IOException thrown = assertThrows(IOException.class, () -> executor.execute(tempDir, "test"));
+        var request = new MavenExecutor.ExecuteRequest(tempDir.toString(), new String[]{"test"});
+        IOException thrown = assertThrows(IOException.class, () -> executor.execute(request));
         assertEquals("Failed to create ProcessBuilder", thrown.getMessage());
         assertEquals(factoryException, thrown.getCause());
     }
@@ -96,7 +99,8 @@ class MavenExecutorTest {
 
         // Act & Assert: The main thread should throw InterruptedException.
         // The reader thread's IOException is an expected side-effect that is now covered.
-        assertThrows(InterruptedException.class, () -> executor.execute(tempDir, "sleep"));
+        var request = new MavenExecutor.ExecuteRequest(tempDir.toString(), new String[]{"sleep"});
+        assertThrows(InterruptedException.class, () -> executor.execute(request));
     }
 
     @Test
@@ -109,6 +113,7 @@ class MavenExecutorTest {
         // Act & Assert: Execute a real Maven command that is guaranteed to take longer than the timeout.
         // The `exec-maven-plugin` with a `sleep` goal is perfect for this.
         // We expect an InterruptedException because the main thread's `waitFor` will time out.
-        assertThrows(InterruptedException.class, () -> shortTimeoutExecutor.execute(tempDir, "org.codehaus.mojo:exec-maven-plugin:3.2.0:exec", "-Dexec.executable=sleep", "-Dexec.args=1"));
+        var request = new MavenExecutor.ExecuteRequest(tempDir.toString(), new String[]{"org.codehaus.mojo:exec-maven-plugin:3.2.0:exec", "-Dexec.executable=sleep", "-Dexec.args=1"});
+        assertThrows(InterruptedException.class, () -> shortTimeoutExecutor.execute(request));
     }
 }

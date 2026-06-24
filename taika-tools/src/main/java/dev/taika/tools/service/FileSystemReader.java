@@ -1,5 +1,6 @@
 package dev.taika.tools.service;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -15,29 +16,38 @@ import java.util.stream.Stream;
 public class FileSystemReader {
 
     /**
+     * This is the DTO that Spring AI will convert into a JSON schema for the AI model.
+     * The AI will fill this object's fields.
+     */
+    public record ReadRequest(
+            @JsonProperty(required = true, value = "rootPath") String rootPath,
+            @JsonProperty(required = true, value = "globPatterns") String[] globPatterns
+    ) {}
+
+    /**
      * Recursively finds and reads files matching glob patterns.
      *
-     * @param rootPath The directory to start scanning from.
-     * @param globPatterns The glob patterns to match files against (e.g., "*.java", "context.md").
-     * @return A map where the key is the file's Path and the value is its content as a String.
+     * @param request The DTO containing the root path and glob patterns.
+     * @return A map where the key is the file's path as a String and the value is its content.
      * @throws IOException If an I/O error occurs.
      */
-    public Map<Path, String> readAll(Path rootPath, String... globPatterns) throws IOException {
-        PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**{" + String.join(",", globPatterns) + "}");
+    public Map<String, String> readAll(ReadRequest request) throws IOException {
+        Path root = Path.of(request.rootPath());
+        PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**{" + String.join(",", request.globPatterns()) + "}");
 
-        try (Stream<Path> walk = Files.walk(rootPath)) {
+        try (Stream<Path> walk = Files.walk(root)) {
             return walk
                     .filter(Files::isRegularFile)
                     .filter(matcher::matches)
                     .collect(Collectors.toMap(
-                            path -> path,
+                            path -> path.toString(), // Convert Path to String for the AI
                             this::readFileContent
                     ));
         }
     }
 
     // Extracted for better testability
-    String readFileContent(Path path) {
+    private String readFileContent(Path path) {
         try {
             return Files.readString(path);
         } catch (IOException e) {

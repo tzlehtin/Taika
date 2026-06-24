@@ -26,7 +26,8 @@ class FileReaderTest {
         String expectedContent = "Hello, Taika!";
         Files.writeString(file, expectedContent);
 
-        String actualContent = fileReader.readFile(file);
+        var request = new FileReader.ReadFileRequest(file.toString());
+        String actualContent = fileReader.readFile(request);
 
         assertEquals(expectedContent, actualContent);
     }
@@ -34,6 +35,7 @@ class FileReaderTest {
     @Test
     void shouldThrowIOExceptionForNonExistentFile(@TempDir Path tempDir) {
         Path nonExistentFile = tempDir.resolve("nonexistent.txt");
-        assertThrows(IOException.class, () -> fileReader.readFile(nonExistentFile));
+        var request = new FileReader.ReadFileRequest(nonExistentFile.toString());
+        assertThrows(IOException.class, () -> fileReader.readFile(request));
     }
 }
