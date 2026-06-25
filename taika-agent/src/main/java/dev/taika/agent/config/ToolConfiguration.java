@@ -15,7 +15,7 @@ public class ToolConfiguration {
 
     @Bean
     @Description("Recursively finds and reads files matching glob patterns from a root directory.")
-    public Function<FileSystemReader.ReadRequest, java.util.Map<String, String>> fileSystemReader(FileSystemReader service) {
+    public Function<FileSystemReader.ReadRequest, java.util.Map<String, String>> fileSystemReaderFunction(FileSystemReader service) {
         return request -> {
             try {
                 return service.readAll(request);
@@ -27,7 +27,7 @@ public class ToolConfiguration {
 
     @Bean
     @Description("Writes or overwrites content to a specified file path.")
-    public Function<FileSystemWriter.WriteRequest, String> fileSystemWriter(FileSystemWriter service) {
+    public Function<FileSystemWriter.WriteRequest, String> fileSystemWriterFunction(FileSystemWriter service) {
         return request -> {
             try {
                 return service.write(request);
@@ -39,7 +39,7 @@ public class ToolConfiguration {
 
     @Bean
     @Description("Executes Maven commands (e.g., 'clean install') in a specified project directory.")
-    public Function<MavenExecutor.ExecuteRequest, String> mavenExecutor(MavenExecutor service) {
+    public Function<MavenExecutor.ExecuteRequest, String> mavenExecutorFunction(MavenExecutor service) {
         return request -> {
             try {
                 return service.execute(request);
@@ -51,7 +51,7 @@ public class ToolConfiguration {
 
     @Bean
     @Description("Reads the content of a single file from a given path.")
-    public Function<FileReader.ReadFileRequest, String> fileReader(FileReader service) {
+    public Function<FileReader.ReadFileRequest, String> fileReaderFunction(FileReader service) {
         return request -> {
             try {
                 return service.readFile(request);

@@ -41,7 +41,7 @@ class ToolConfigurationTest {
     @Test
     void fileSystemReaderFunction_shouldCallServiceAndHandleException() throws IOException {
         // Arrange
-        Function<FileSystemReader.ReadRequest, Map<String, String>> function = toolConfiguration.fileSystemReader(fileSystemReader);
+        Function<FileSystemReader.ReadRequest, Map<String, String>> function = toolConfiguration.fileSystemReaderFunction(fileSystemReader);
         var request = new FileSystemReader.ReadRequest("/fake", new String[]{"*.java"});
 
         // Act
@@ -60,7 +60,7 @@ class ToolConfigurationTest {
     @Test
     void fileSystemWriterFunction_shouldCallServiceAndHandleException() throws IOException {
         // Arrange
-        Function<FileSystemWriter.WriteRequest, String> function = toolConfiguration.fileSystemWriter(fileSystemWriter);
+        Function<FileSystemWriter.WriteRequest, String> function = toolConfiguration.fileSystemWriterFunction(fileSystemWriter);
         var request = new FileSystemWriter.WriteRequest("/fake/file.txt", "content");
 
         // Act
@@ -79,7 +79,7 @@ class ToolConfigurationTest {
     @Test
     void mavenExecutorFunction_shouldCallServiceAndHandleException() throws Exception {
         // Arrange
-        Function<MavenExecutor.ExecuteRequest, String> function = toolConfiguration.mavenExecutor(mavenExecutor);
+        Function<MavenExecutor.ExecuteRequest, String> function = toolConfiguration.mavenExecutorFunction(mavenExecutor);
         var request = new MavenExecutor.ExecuteRequest("/fake", new String[]{"clean"});
 
         // Act
@@ -98,7 +98,7 @@ class ToolConfigurationTest {
     @Test
     void fileReaderFunction_shouldCallServiceAndHandleException() throws IOException {
         // Arrange
-        Function<FileReader.ReadFileRequest, String> function = toolConfiguration.fileReader(fileReader);
+        Function<FileReader.ReadFileRequest, String> function = toolConfiguration.fileReaderFunction(fileReader);
         var request = new FileReader.ReadFileRequest("/fake/file.txt");
 
         // Act

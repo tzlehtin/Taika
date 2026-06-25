@@ -64,7 +64,7 @@ public class AgentService {
         String responseContent = chatClientBuilder.build()
                 .prompt()
                 .messages(systemMessage, userMessage)
-                .tools("fileSystemReader", "fileSystemWriter", "mavenExecutor", "fileReader")
+                .tools("fileSystemReaderFunction", "fileSystemWriterFunction", "mavenExecutorFunction", "fileReaderFunction")
                 .call()
                 .content();
 

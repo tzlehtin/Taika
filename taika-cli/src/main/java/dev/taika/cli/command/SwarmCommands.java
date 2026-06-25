@@ -6,6 +6,7 @@ import org.springframework.shell.standard.ShellComponent;
 import org.springframework.shell.standard.ShellMethod;
 import org.springframework.shell.standard.ShellOption;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 @ShellComponent("Taika Swarm Commands")
@@ -29,6 +30,15 @@ public class SwarmCommands {
 
         try {
             Path projectPath = Path.of(path).toAbsolutePath();
+
+            // Validate the path as required by context.md
+            if (!Files.exists(projectPath)) {
+                return "Error: The specified path does not exist: " + projectPath;
+            }
+            if (!Files.isDirectory(projectPath)) {
+                return "Error: The specified path is not a directory: " + projectPath;
+            }
+
             SwarmResult result = swarmOrchestrator.orchestrate(projectPath, objective);
 
             // Format and return a simple summary

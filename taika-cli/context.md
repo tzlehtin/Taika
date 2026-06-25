@@ -33,3 +33,22 @@ The application relies on Google Cloud Application Default Credentials (ADC) to 
 * **Required Command**:
   ```bash
   gcloud auth application-default login
+
+## Build and Packaging Rules
+1. The project must be packaged into an executable JAR.
+2. The `pom.xml` configuration must explicitly define the `Main-Class` manifest attribute using the `maven-jar-plugin` or `spring-boot-maven-plugin` (depending on the framework).
+3. If the agent modifies the `pom.xml` or creates a new module, it MUST ensure the following plugin configuration is present to avoid the "no main manifest attribute" runtime error:
+
+```xml
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-jar-plugin</artifactId>
+    <version>3.3.0</version>
+    <configuration>
+        <archive>
+            <manifest>
+                <addClasspath>true</addClasspath>
+                <mainClass>com.louhisoftware.taika.cli.TaikaCliApplication</mainClass> </manifest>
+        </archive>
+    </configuration>
+</plugin>
