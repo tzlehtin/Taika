@@ -1,11 +1,17 @@
 package dev.taika.agent.service;
 
+import dev.taika.agent.tools.ToolRegistry;
 import dev.taika.api.AgentResult;
 import dev.taika.api.AgentType;
 import dev.taika.tools.service.FileSystemReader;
+import dev.taika.tools.service.FileSystemWriter;
+import dev.taika.tools.service.MavenExecutor;
+import dev.taika.tools.service.FileReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.stereotype.Service;
@@ -22,10 +28,20 @@ public class AgentService {
 
     private final ChatClient.Builder chatClientBuilder;
     private final FileSystemReader fileSystemReader;
+    private final FileSystemWriter fileSystemWriter;
+    private final MavenExecutor mavenExecutor;
+    private final FileReader fileReader;
 
-    public AgentService(ChatClient.Builder chatClientBuilder, FileSystemReader fileSystemReader) {
+    public AgentService(ChatClient.Builder chatClientBuilder,
+                        FileSystemReader fileSystemReader,
+                        FileSystemWriter fileSystemWriter,
+                        MavenExecutor mavenExecutor,
+                        FileReader fileReader) {
         this.chatClientBuilder = chatClientBuilder;
         this.fileSystemReader = fileSystemReader;
+        this.fileSystemWriter = fileSystemWriter;
+        this.mavenExecutor = mavenExecutor;
+        this.fileReader = fileReader;
     }
 
     public AgentResult executeTask(Path projectPath, AgentType agentType, String taskDescription) {
@@ -35,7 +51,7 @@ public class AgentService {
         String context;
         // Correctly handle the Map returned by readAll
         try {
-            var readRequest = new FileSystemReader.ReadRequest(projectPath.toAbsolutePath().toString(), new String[]{"*.java", "*.md", "pom.xml"});
+            var readRequest = new FileSystemReader.ReadRequest(projectPath.toAbsolutePath().toString(), new String[]{"*.java", "*.md", "pom.xml", "*.env"});
             Map<String, String> files = fileSystemReader.readAll(readRequest);
             context = files.entrySet().stream()
                     .map(entry -> "--- " + entry.getKey() + " ---\n" + entry.getValue())
@@ -50,7 +66,12 @@ public class AgentService {
         var systemPromptTemplate = new SystemPromptTemplate("""
                 You are a world-class software engineering assistant. Your task is to perform the requested action on the provided code context.
                 You must use the available tools to read and write files, and to compile and test the code.
-                Think step-by-step and explain your reasoning.
+                Think step-by-step and explain your reasoning. When your task requires creating or modifying a file, you MUST use the `fileSystemWriter` tool.
+                Do NOT output file contents in your response. Your final response should only be a brief confirmation of the action you took.
+                
+                IMPORTANT MAVEN RULE: If you create a pom.xml for a new executable application, you MUST configure the `maven-jar-plugin` to define the main class.
+                Failure to do so will result in a 'no main manifest attribute' runtime error.
+                Ensure the <build> section of the pom.xml contains the necessary plugin configuration to specify the mainClass.
                 """);
         var systemMessage = systemPromptTemplate.createMessage();
 
@@ -59,16 +80,22 @@ public class AgentService {
                 "Project Context:\n" + context
         );
 
+        // Dynamically create the ToolRegistry for this specific task, passing the projectPath.
+        var toolRegistry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, projectPath);
+
         // 3. Execution Loop (simplified to a single call for this implementation)
         logger.info("Calling AI model with assembled prompt and tools...");
-        String responseContent = chatClientBuilder.build()
+        ChatResponse response = chatClientBuilder.build()
                 .prompt()
                 .messages(systemMessage, userMessage)
-                .tools("fileSystemReaderFunction", "fileSystemWriterFunction", "mavenExecutorFunction", "fileReaderFunction")
+                .toolCallbacks(toolRegistry.getToolCallbacks())
                 .call()
-                .content();
+                .chatResponse(); // Get the final response object as shown in the working example.
 
+        // Use the correct .getText() method as proven by the provided example.
+        String responseContent = response.getResult().getOutput().getText();
         logger.info("AI execution finished. Response: {}", responseContent);
+
 
         // For now, we return the direct AI response. A real implementation would parse this
         // and extract structured data like modified files.
