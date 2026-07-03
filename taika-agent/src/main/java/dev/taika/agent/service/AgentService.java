@@ -51,7 +51,14 @@ public class AgentService {
         String context;
         // Correctly handle the Map returned by readAll
         try {
-            var readRequest = new FileSystemReader.ReadRequest(projectPath.toAbsolutePath().toString(), new String[]{"*.java", "*.md", "pom.xml", "*.env"});
+            // CRITICAL FIX: Limit the context for the VALIDATOR agent to prevent context window overflow.
+            // It only needs to see the documentation, not the entire codebase, to write a README.
+            String[] globPatterns = (agentType == AgentType.VALIDATOR)
+                    ? new String[]{"*.md", "pom.xml"}
+                    : new String[]{"*.java", "*.md", "pom.xml", "*.env"};
+
+            logger.info("Assembling context for agent {} with glob patterns: {}", agentType, String.join(", ", globPatterns));
+            var readRequest = new FileSystemReader.ReadRequest(projectPath.toAbsolutePath().toString(), globPatterns);
             Map<String, String> files = fileSystemReader.readAll(readRequest);
             context = files.entrySet().stream()
                     .map(entry -> "--- " + entry.getKey() + " ---\n" + entry.getValue())

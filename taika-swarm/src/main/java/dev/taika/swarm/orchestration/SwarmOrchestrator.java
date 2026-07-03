@@ -77,7 +77,7 @@ public class SwarmOrchestrator {
             case CODER:
                 return new StateTransition(AgentType.TESTER, "The code has been written or modified. Write comprehensive JUnit tests to ensure full functionality and code coverage. Run 'mvn test' and ensure it passes.");
             case TESTER:
-                return new StateTransition(AgentType.VALIDATOR, "The code is written and all tests pass. Review the code against the project's context.md and api.md. Ensure the implementation matches the documentation. If it does not, provide a detailed list of changes needed. If it does, write a comprehensive README.md for the project.");
+                return new StateTransition(AgentType.VALIDATOR, "The project has been implemented and tested. Your final and only task is to use the 'fileSystemWriter' tool to write a comprehensive README.md file to the project root, summarizing the project based on the provided context files. Do not respond with the content of the file, just confirm that the tool was called.");
             case VALIDATOR:
                 return new StateTransition(null, "Task complete."); // null indicates completion
             default:

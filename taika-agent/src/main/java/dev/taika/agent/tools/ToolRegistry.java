@@ -40,7 +40,6 @@ public class ToolRegistry {
                     Path safePath = projectPath.resolve(request.rootPath()).normalize();
                     logger.info("TOOL CALL: fileSystemReader | Safe Path: {}", safePath);
                     try {
-                        // Create a new, safe request with the absolute path.
                         return fileSystemReader.readAll(new FileSystemReader.ReadRequest(safePath.toString(), request.globPatterns()));
                     } catch (IOException e) {
                         logger.error("TOOL ERROR: fileSystemReader failed.", e);
