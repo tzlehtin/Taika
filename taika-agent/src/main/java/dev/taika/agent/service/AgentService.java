@@ -10,10 +10,10 @@ import dev.taika.tools.service.FileReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -65,10 +65,9 @@ public class AgentService {
         }
 
         // 2. Role Isolation & Prompt Assembly
-        var systemPromptTemplate = new SystemPromptTemplate(resolveSystemPrompt(agentType));
-        var systemMessage = systemPromptTemplate.createMessage();
+        var systemMessage = new SystemMessage(resolveSystemPrompt(agentType));
 
-        var userMessage = new org.springframework.ai.chat.messages.UserMessage(
+        var userMessage = new UserMessage(
                 "Task: " + taskDescription + "\n\n" +
                 "Project Context:\n" + context
         );
@@ -112,15 +111,45 @@ public class AgentService {
     private String resolveSystemPrompt(AgentType agentType) {
         if (agentType == AgentType.ROBOT_TESTER) {
             return """
-                You are a specialized Robot Framework QA Automation Engineer.
-                Your sole responsibility is to generate acceptance and process-level test suites in Robot Framework syntax (*.robot).
+                You are a specialized Robot Framework QA Engineer.
+                Your sole responsibility is to generate clean, standard Robot Framework test suites (*.robot) that pass `robot --dryrun` without any errors on the very first try.
                 
-                STRICT RULES:
-                1. Analyze `context.md`, `api.md`, and any existing specification files in the project.
-                2. Identify key scenarios: happy paths, input validation, and boundary/edge failure cases.
-                3. Write the Robot Framework test file into the target project using the `fileSystemWriter` tool (e.g. `src/test/robot/` or `tests/robot/`).
-                4. You must ONLY create/modify test files. Do NOT implement or change production application code.
-                5. In your final text response, provide a brief summary of the exact test cases and edge cases you created.
+                CRITICAL SYNTAX & LIBRARY RULES:
+                1. If you use Collections keywords (like `List Should Contain Value`, `Get From Dictionary`), you MUST declare `Library    Collections` under `*** Settings ***`.
+                2. If you use String keywords, you MUST declare `Library    String` under `*** Settings ***`.
+                3. NEVER invent non-existent keywords:
+                   - There is NO 'Should Be False' keyword in Robot Framework BuiltIn. Use:
+                     `Should Be Equal As Strings    ${result}    FAILURE` or `Should Be True    not ${result}`.
+                   - There is NO 'Should Contain Key' keyword. Use `Dictionary Should Contain Key`.
+                   - Do NOT prefix built-in keywords with 'BuiltIn.' or 'Collections.'. Call them plainly: `Should Be Equal`, `Log`, `Should Contain`.
+                4. Keep keywords extremely simple and declarative. Do NOT attempt to implement complex validation algorithms inside Robot.
+                   Define high-level user scenario keywords (e.g. `Validate Credentials`, `Check Validation Status`) with simple assertions.
+                5. NEVER import Java classes (e.g. `Library com.lumo...`) and NEVER create separate .py files.
+                6. You MUST call `fileSystemWriter` tool immediately to write the `.robot` file.
+                
+                EXAMPLE OF A CLEAN, VALID .ROBOT FILE:
+                *** Settings ***
+                Library    Collections
+                Library    String
+
+                *** Keywords ***
+                Validate Credentials
+                    [Arguments]    ${email}    ${password}    ${expected_status}
+                    Log    Validating email=${email} password=${password}
+                    Should Be True    '${expected_status}' in ['VALID', 'INVALID']
+
+                *** Test Cases ***
+                Valid Email And Strong Password
+                    Validate Credentials    user@lumo.ws    ValidPass1    VALID
+
+                Empty Email Fails
+                    Validate Credentials    ${EMPTY}        ValidPass1    INVALID
+
+                Short Password Fails
+                    Validate Credentials    user@lumo.ws    short         INVALID
+
+                Missing Number In Password Fails
+                    Validate Credentials    user@lumo.ws    NoNumberPass  INVALID
                 """;
         }
 

@@ -38,11 +38,14 @@ class SwarmOrchestratorTest {
     @Test
     void generateRobotTests_shouldSucceedWhenAgentReturnsSuccess() {
         // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
         var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Robot tests created", List.of(), "Suite details...");
         when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.DryRunResult(true, "Dry run passed"))
+                .when(spiedOrchestrator).executeRobotDryRun(fakePath);
 
         // Act
-        SwarmResult result = swarmOrchestrator.generateRobotTests(fakePath);
+        SwarmResult result = spiedOrchestrator.generateRobotTests(fakePath);
 
         // Assert
         assertEquals(SwarmStatus.SUCCESS, result.status());

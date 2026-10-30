@@ -20,6 +20,7 @@ Generates acceptance- and process-level Robot Framework test suites (*.robot) fr
 
 * **Arguments & Flags:**
     * `--path, -p` (Required, String): Path to the target project root containing specification files.
+    * `--max-loops, -m` (Optional, Integer, Default: 8): Maximum iterative self-correction cycles with `robot --dryrun`.
 * **Example Usage:**
   ```bash
   taika gen-robots --path /home/tero/cases/lumo-auth-service

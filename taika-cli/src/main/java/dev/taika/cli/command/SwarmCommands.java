@@ -51,10 +51,12 @@ public class SwarmCommands {
 
     @ShellMethod(key = {"gen-robots", "robot-tests"}, value = "Generates Robot Framework test suites based on context.md and api.md.")
     public String generateRobotTests(
-            @ShellOption(value = {"--path", "-p"}, help = "The absolute or relative path to the root directory of the project.") String path
+            @ShellOption(value = {"--path", "-p"}, help = "The absolute or relative path to the root directory of the project.") String path,
+            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "8", help = "Maximum dry-run self-healing iterations.") int maxLoops
     ) {
         System.out.println("Starting Robot test suite generation:");
         System.out.println("Project Path: " + path);
+        System.out.println("Max Loops: " + maxLoops);
         System.out.println("-------------------------------------------------");
 
         try {
@@ -67,7 +69,7 @@ public class SwarmCommands {
                 return "Error: The specified path is not a directory: " + projectPath;
             }
 
-            SwarmResult result = swarmOrchestrator.generateRobotTests(projectPath);
+            SwarmResult result = swarmOrchestrator.generateRobotTests(projectPath, maxLoops);
             return String.format("\nRobot Test Generation Complete!\nStatus: %s\nSummary:\n%s",
                     result.status(), result.finalSummary());
         } catch (Exception e) {
