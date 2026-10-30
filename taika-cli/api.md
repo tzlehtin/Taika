@@ -13,3 +13,14 @@ Triggers the multi-agent swarm orchestration for a targeted local repository.
 * **Example Usage:**
   ```bash
   taika execution --path /users/projects/my-app --objective "Add validation to user registration endpoint and verify with tests"
+  ```
+
+### Command: `taika gen-robots` (alias: `robot-tests`)
+Generates acceptance- and process-level Robot Framework test suites (*.robot) from `context.md` and `api.md` without triggering production code generation.
+
+* **Arguments & Flags:**
+    * `--path, -p` (Required, String): Path to the target project root containing specification files.
+* **Example Usage:**
+  ```bash
+  taika gen-robots --path /home/tero/cases/lumo-auth-service
+  ```

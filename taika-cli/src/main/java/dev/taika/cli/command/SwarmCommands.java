@@ -48,4 +48,30 @@ public class SwarmCommands {
             return "An unexpected error occurred during orchestration: " + e.getMessage();
         }
     }
+
+    @ShellMethod(key = {"gen-robots", "robot-tests"}, value = "Generates Robot Framework test suites based on context.md and api.md.")
+    public String generateRobotTests(
+            @ShellOption(value = {"--path", "-p"}, help = "The absolute or relative path to the root directory of the project.") String path
+    ) {
+        System.out.println("Starting Robot test suite generation:");
+        System.out.println("Project Path: " + path);
+        System.out.println("-------------------------------------------------");
+
+        try {
+            Path projectPath = Path.of(path).toAbsolutePath().normalize();
+
+            if (!Files.exists(projectPath)) {
+                return "Error: The specified path does not exist: " + projectPath;
+            }
+            if (!Files.isDirectory(projectPath)) {
+                return "Error: The specified path is not a directory: " + projectPath;
+            }
+
+            SwarmResult result = swarmOrchestrator.generateRobotTests(projectPath);
+            return String.format("\nRobot Test Generation Complete!\nStatus: %s\nSummary:\n%s",
+                    result.status(), result.finalSummary());
+        } catch (Exception e) {
+            return "An unexpected error occurred during Robot test generation: " + e.getMessage();
+        }
+    }
 }

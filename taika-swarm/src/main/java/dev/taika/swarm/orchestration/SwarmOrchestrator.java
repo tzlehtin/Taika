@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.nio.file.Path;
 
 @Service
@@ -33,15 +34,20 @@ public class SwarmOrchestrator {
         var thread = new ExecutionThread();
         String taskDescription = "Read context.md and api.md. Generate comprehensive Robot Framework test cases covering happy path and edge/failure cases. Write the .robot file to the appropriate test folder.";
 
-        AgentResult result = agentService.executeTask(projectPath, AgentType.ROBOT_TESTER, taskDescription);
-        thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status()));
+        try {
+            AgentResult result = agentService.executeTask(projectPath, AgentType.ROBOT_TESTER, taskDescription);
+            thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status()));
 
-        if ("SUCCESS".equalsIgnoreCase(result.status())) {
-            return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(),
-                    "Robot tests generated successfully:\n" + result.executionLog());
-        } else {
-            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(),
-                    "Failed to generate Robot tests: " + result.summary());
+            if ("SUCCESS".equalsIgnoreCase(result.status())) {
+                return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(),
+                        "Robot tests generated successfully:\n" + result.executionLog());
+            } else {
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(),
+                        "Failed to generate Robot tests: " + result.summary());
+            }
+        } catch (Exception e) {
+            logger.error("Error executing ROBOT_TESTER for project '{}'", projectPath, e);
+            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed: " + e.getMessage());
         }
     }
 

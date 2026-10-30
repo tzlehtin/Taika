@@ -80,3 +80,7 @@ mvn clean install -U
     ```bash
     execution --path /path/to/your/target/project --objective "Implement a new REST endpoint that returns a list of users."
     ```
+    To generate Robot Framework acceptance tests without triggering production code:
+    ```bash
+    gen-robots --path /path/to/your/target/project
+    ```

@@ -11,7 +11,7 @@ This module serves as the primary user interface and entry point for the Taika s
 ## Architectural Blueprint
 The CLI acts as the deterministic front door to the dynamic agent architecture.
 
-1.  **Command Parsing**: The user executes a command (e.g., `taika execution --path . --objective "Implement feature X"`). The CLI parses the flags and arguments using a standard CLI library.
+1.  **Command Parsing**: The user executes a command (e.g., `taika execution --path . --objective "Implement feature X"` or `taika gen-robots --path .`). The CLI parses the flags and arguments using a standard CLI library.
 2.  **Validation**: It verifies that the target project path exists and is a valid directory, and that the main objective is not empty.
 3.  **Swarm Invocation**: The CLI bootstraps the context and calls the `SwarmOrchestrator` from `taika-swarm`. It blocks execution (or streams updates if applicable in later phases) while the swarm executes its hybrid agent loops.
 4.  **Result Formatting**: Once the swarm completes its execution chain, the CLI receives the `SwarmResult`. It parses the invocation logs and outputs a clean, human-readable report to the terminal (standard output), indicating whether the objective was met and detailing which steps were taken.
