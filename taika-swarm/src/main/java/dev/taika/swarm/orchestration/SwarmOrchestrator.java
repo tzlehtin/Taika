@@ -25,12 +25,32 @@ public class SwarmOrchestrator {
         this.agentService = agentService;
     }
 
+    /**
+     * Executes only the Robot Framework test generation step.
+     */
+    public SwarmResult generateRobotTests(Path projectPath) {
+        logger.info("Executing standalone ROBOT_TESTER for project '{}'", projectPath);
+        var thread = new ExecutionThread();
+        String taskDescription = "Read context.md and api.md. Generate comprehensive Robot Framework test cases covering happy path and edge/failure cases. Write the .robot file to the appropriate test folder.";
+
+        AgentResult result = agentService.executeTask(projectPath, AgentType.ROBOT_TESTER, taskDescription);
+        thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status()));
+
+        if ("SUCCESS".equalsIgnoreCase(result.status())) {
+            return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(),
+                    "Robot tests generated successfully:\n" + result.executionLog());
+        } else {
+            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(),
+                    "Failed to generate Robot tests: " + result.summary());
+        }
+    }
+
     public SwarmResult orchestrate(Path projectPath, String mainObjective) {
         logger.info("Starting swarm orchestration for project '{}' with objective: {}", projectPath, mainObjective);
 
         var thread = new ExecutionThread();
-        String currentTask = mainObjective;
-        AgentType nextAgent = AgentType.CODER;
+        AgentType nextAgent = AgentType.ROBOT_TESTER;
+        String currentTask = "Analyze context.md and api.md and generate initial Robot Framework integration test cases before writing code.";
 
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             logger.info("Iteration {}/{} | Invoking {} agent...", i + 1, MAX_ITERATIONS, nextAgent);
@@ -74,6 +94,8 @@ public class SwarmOrchestrator {
 
     protected StateTransition getNextState(AgentType currentAgent) {
         switch (currentAgent) {
+            case ROBOT_TESTER:
+                return new StateTransition(AgentType.CODER, "Robot tests have been created. Implement the production code matching api.md and context.md.");
             case CODER:
                 return new StateTransition(AgentType.TESTER, "The code has been written or modified. Write comprehensive JUnit tests to ensure full functionality and code coverage. Run 'mvn test' and ensure it passes.");
             case TESTER:

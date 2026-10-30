@@ -114,4 +114,37 @@ class AgentServiceTest {
         assertEquals("Failed to read project context.", result.summary());
         assertNotNull(result.executionLog());
     }
+
+    @Test
+    void executeTask_shouldSucceedWithRobotTesterRole() throws IOException {
+        // Arrange
+        when(chatClientBuilder.build()).thenReturn(chatClient);
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.messages(any(), any())).thenReturn(requestSpec);
+        when(requestSpec.toolCallbacks(any(List.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        ChatResponse mockChatResponse = mock(ChatResponse.class);
+        Generation mockGeneration = mock(Generation.class);
+        when(callResponseSpec.chatResponse()).thenReturn(mockChatResponse);
+        when(mockChatResponse.getResult()).thenReturn(mockGeneration);
+        when(mockGeneration.getOutput()).thenReturn(new AssistantMessage("Robot test suite generated."));
+
+        Map<String, String> fakeFiles = Map.of(
+                "context.md", "Context content",
+                "api.md", "API specification"
+        );
+        when(fileSystemReader.readAll(any(FileSystemReader.ReadRequest.class))).thenReturn(fakeFiles);
+
+        // Act
+        AgentResult result = agentService.executeTask(fakePath, AgentType.ROBOT_TESTER, "Generate robot tests");
+
+        // Assert
+        assertEquals("SUCCESS", result.status());
+        assertEquals("Robot test suite generated.", result.executionLog());
+    }
 }

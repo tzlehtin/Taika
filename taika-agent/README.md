@@ -7,19 +7,19 @@ This module is the "brain" of the Taika system. It is responsible for orchestrat
 ## Core Components
 
 *   **`AgentService`**: The public-facing entry point for the module. It receives a task, assembles the full context (including project files read via `FileSystemReader`), constructs a detailed prompt for the AI, and initiates the execution loop.
-*   **`ToolConfiguration`**: This is the central component for exposing tools to the AI. It defines every available service from `taika-tools` as a standard Spring `Function` bean. Each bean is given a clear, natural language `@Description` that the AI uses to understand its purpose.
+*   **`ToolRegistry`**: Exposes services from `taika-tools` to the AI as Spring AI `ToolCallback` instances, dynamically resolving paths against the target project path.
 
 ## Architectural Principles & Execution Flow
 
 1.  **Task Initiation**: An external caller (like `taika-swarm` or `taika-cli`) invokes `AgentService.executeTask` with a project path and a task description.
 2.  **Context Loading**: `AgentService` uses the `fileSystemReader` tool to load the project's source code and markdown files into the AI's context.
-3.  **Tool Registration via Spring AI**: The `AgentService` calls the `ChatClient` and specifies the names of the tool beans it wants to make available (e.g., `.tools("fileSystemReader", "fileSystemWriter", ...)`).
-4.  **Function Calling**: Spring AI automatically finds the corresponding `Function` beans from `ToolConfiguration`, generates a JSON schema for the AI model from their DTO inputs (e.g., `FileSystemReader.ReadRequest`), and includes these schemas in the prompt.
-5.  **Execution**: When the AI model decides to use a tool, Spring AI intercepts the request, invokes the correct `Function` bean with the AI-provided arguments, and returns the result to the model.
+3.  **Tool Registration via Spring AI**: The `AgentService` creates a `ToolRegistry` instance for the specific `projectPath` and provides callbacks via `.toolCallbacks(...)`.
+4.  **Function Calling**: Spring AI exposes the tools to Gemini using function calling schemas generated from their input DTOs (e.g., `FileSystemReader.ReadRequest`).
+5.  **Execution**: When the AI model decides to use a tool, Spring AI invokes the registered callback, which executes the corresponding `taika-tools` service using safe absolute paths.
 
 This architecture ensures a clean separation of concerns:
 *   `taika-tools` knows nothing about AI.
-*   `taika-agent` knows nothing about the low-level implementation of the tools; it only knows them by the names defined in `ToolConfiguration`.
+*   `taika-agent` delegates low-level process and file execution to `taika-tools` via `ToolRegistry`.
 
 ## Dependencies
 *   `org.springframework.ai:spring-ai-vertex-ai-gemini-starter`: For core `ChatClient` integration.

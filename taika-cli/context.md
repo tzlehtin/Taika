@@ -48,7 +48,7 @@ The application relies on Google Cloud Application Default Credentials (ADC) to 
         <archive>
             <manifest>
                 <addClasspath>true</addClasspath>
-                <mainClass>com.louhisoftware.taika.cli.TaikaCliApplication</mainClass> </manifest>
+                <mainClass>dev.taika.cli.TaikaCliApplication</mainClass> </manifest>
         </archive>
     </configuration>
 </plugin>

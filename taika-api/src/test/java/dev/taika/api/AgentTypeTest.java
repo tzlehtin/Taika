@@ -11,11 +11,14 @@ class AgentTypeTest {
     void shouldHaveCorrectEnumConstants() {
         // Verify that all expected enum constants exist.
         assertNotNull(AgentType.INTERFACE_DESIGNER);
+        assertNotNull(AgentType.ROBOT_TESTER);
+        assertNotNull(AgentType.UNIT_TESTER);
         assertNotNull(AgentType.CODER);
         assertNotNull(AgentType.TESTER);
         assertNotNull(AgentType.VALIDATOR);
 
         // Verify that valueOf works as expected.
         assertEquals(AgentType.CODER, AgentType.valueOf("CODER"));
+        assertEquals(AgentType.ROBOT_TESTER, AgentType.valueOf("ROBOT_TESTER"));
     }
 }

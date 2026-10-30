@@ -51,11 +51,7 @@ public class AgentService {
         String context;
         // Correctly handle the Map returned by readAll
         try {
-            // CRITICAL FIX: Limit the context for the VALIDATOR agent to prevent context window overflow.
-            // It only needs to see the documentation, not the entire codebase, to write a README.
-            String[] globPatterns = (agentType == AgentType.VALIDATOR)
-                    ? new String[]{"*.md", "pom.xml"}
-                    : new String[]{"*.java", "*.md", "pom.xml", "*.env"};
+            String[] globPatterns = getGlobPatternsForAgent(agentType);
 
             logger.info("Assembling context for agent {} with glob patterns: {}", agentType, String.join(", ", globPatterns));
             var readRequest = new FileSystemReader.ReadRequest(projectPath.toAbsolutePath().toString(), globPatterns);
@@ -69,17 +65,7 @@ public class AgentService {
         }
 
         // 2. Role Isolation & Prompt Assembly
-        // For now, using a generic system prompt. In the future, this could load from a file based on AgentType.
-        var systemPromptTemplate = new SystemPromptTemplate("""
-                You are a world-class software engineering assistant. Your task is to perform the requested action on the provided code context.
-                You must use the available tools to read and write files, and to compile and test the code.
-                Think step-by-step and explain your reasoning. When your task requires creating or modifying a file, you MUST use the `fileSystemWriter` tool.
-                Do NOT output file contents in your response. Your final response should only be a brief confirmation of the action you took.
-                
-                IMPORTANT MAVEN RULE: If you create a pom.xml for a new executable application, you MUST configure the `maven-jar-plugin` to define the main class.
-                Failure to do so will result in a 'no main manifest attribute' runtime error.
-                Ensure the <build> section of the pom.xml contains the necessary plugin configuration to specify the mainClass.
-                """);
+        var systemPromptTemplate = new SystemPromptTemplate(resolveSystemPrompt(agentType));
         var systemMessage = systemPromptTemplate.createMessage();
 
         var userMessage = new org.springframework.ai.chat.messages.UserMessage(
@@ -113,5 +99,40 @@ public class AgentService {
                 java.util.List.of(), // Placeholder
                 responseContent
         );
+    }
+
+    private String[] getGlobPatternsForAgent(AgentType agentType) {
+        return switch (agentType) {
+            case ROBOT_TESTER -> new String[]{"*.md", "pom.xml", "package.json", "*.robot"};
+            case VALIDATOR -> new String[]{"*.md", "pom.xml", "package.json"};
+            default -> new String[]{"*.java", "*.vue", "*.ts", "*.js", "*.md", "pom.xml", "package.json", "*.env", "*.robot"};
+        };
+    }
+
+    private String resolveSystemPrompt(AgentType agentType) {
+        if (agentType == AgentType.ROBOT_TESTER) {
+            return """
+                You are a specialized Robot Framework QA Automation Engineer.
+                Your sole responsibility is to generate acceptance and process-level test suites in Robot Framework syntax (*.robot).
+                
+                STRICT RULES:
+                1. Analyze `context.md`, `api.md`, and any existing specification files in the project.
+                2. Identify key scenarios: happy paths, input validation, and boundary/edge failure cases.
+                3. Write the Robot Framework test file into the target project using the `fileSystemWriter` tool (e.g. `src/test/robot/` or `tests/robot/`).
+                4. You must ONLY create/modify test files. Do NOT implement or change production application code.
+                5. In your final text response, provide a brief summary of the exact test cases and edge cases you created.
+                """;
+        }
+
+        return """
+                You are a world-class software engineering assistant. Your task is to perform the requested action on the provided code context.
+                You must use the available tools to read and write files, and to compile and test the code.
+                Think step-by-step and explain your reasoning. When your task requires creating or modifying a file, you MUST use the `fileSystemWriter` tool.
+                Do NOT output file contents in your response. Your final response should only be a brief confirmation of the action you took.
+                
+                IMPORTANT MAVEN RULE: If you create a pom.xml for a new executable application, you MUST configure the `maven-jar-plugin` to define the main class.
+                Failure to do so will result in a 'no main manifest attribute' runtime error.
+                Ensure the <build> section of the pom.xml contains the necessary plugin configuration to specify the mainClass.
+                """;
     }
 }

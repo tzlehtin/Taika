@@ -9,6 +9,14 @@ public enum AgentType {
      */
     INTERFACE_DESIGNER,
     /**
+     * Responsible for generating Robot Framework acceptance and process-level test suites (*.robot).
+     */
+    ROBOT_TESTER,
+    /**
+     * Responsible for generating unit tests (e.g., JUnit or Vitest) based on specifications.
+     */
+    UNIT_TESTER,
+    /**
      * Responsible for translating specifications into production-ready Java code under `src/main/java`. Forbidden from touching tests.
      */
     CODER,

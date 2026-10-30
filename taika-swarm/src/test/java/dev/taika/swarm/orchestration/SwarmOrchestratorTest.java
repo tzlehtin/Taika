@@ -36,6 +36,19 @@ class SwarmOrchestratorTest {
     private final String mainObjective = "Implement the main feature.";
 
     @Test
+    void generateRobotTests_shouldSucceedWhenAgentReturnsSuccess() {
+        // Arrange
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Robot tests created", List.of(), "Suite details...");
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
+
+        // Act
+        SwarmResult result = swarmOrchestrator.generateRobotTests(fakePath);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+    }
+
+    @Test
     void orchestrate_shouldSucceedAfterFullCycle() {
         // Arrange
         var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Success", List.of(), "");
@@ -48,10 +61,11 @@ class SwarmOrchestratorTest {
 
         // Assert
         assertEquals(SwarmStatus.SUCCESS, result.status());
-        assertEquals(3, result.invocationHistory().size());
-        assertEquals(AgentType.CODER, result.invocationHistory().get(0).type());
-        assertEquals(AgentType.TESTER, result.invocationHistory().get(1).type());
-        assertEquals(AgentType.VALIDATOR, result.invocationHistory().get(2).type());
+        assertEquals(4, result.invocationHistory().size());
+        assertEquals(AgentType.ROBOT_TESTER, result.invocationHistory().get(0).type());
+        assertEquals(AgentType.CODER, result.invocationHistory().get(1).type());
+        assertEquals(AgentType.TESTER, result.invocationHistory().get(2).type());
+        assertEquals(AgentType.VALIDATOR, result.invocationHistory().get(3).type());
     }
 
     @Test
@@ -60,7 +74,9 @@ class SwarmOrchestratorTest {
         var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Success", List.of(), "");
         var failureResult = new AgentResult(UUID.randomUUID().toString(), "FAILURE", "Tests failed", List.of(), "Error log...");
 
-        // Coder succeeds, Tester fails, Coder succeeds again, then the rest succeed.
+        // Robot tester succeeds, Coder succeeds, Tester fails, Coder succeeds again, then the rest succeed.
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), any(String.class)))
+                .thenReturn(successResult);
         when(agentService.executeTask(eq(fakePath), eq(AgentType.CODER), any(String.class)))
                 .thenReturn(successResult) // First call
                 .thenReturn(successResult); // Second call (after failure)
@@ -74,11 +90,12 @@ class SwarmOrchestratorTest {
 
         // Assert
         assertEquals(SwarmStatus.SUCCESS, result.status());
-        assertEquals(5, result.invocationHistory().size());
-        assertEquals(AgentType.CODER, result.invocationHistory().get(0).type());
-        assertEquals(AgentType.TESTER, result.invocationHistory().get(1).type());
-        assertEquals("FAILURE", result.invocationHistory().get(1).status());
-        assertEquals(AgentType.CODER, result.invocationHistory().get(2).type()); // Loop back
+        assertEquals(6, result.invocationHistory().size());
+        assertEquals(AgentType.ROBOT_TESTER, result.invocationHistory().get(0).type());
+        assertEquals(AgentType.CODER, result.invocationHistory().get(1).type());
+        assertEquals(AgentType.TESTER, result.invocationHistory().get(2).type());
+        assertEquals("FAILURE", result.invocationHistory().get(2).status());
+        assertEquals(AgentType.CODER, result.invocationHistory().get(3).type()); // Loop back
     }
 
     @Test
@@ -107,7 +124,7 @@ class SwarmOrchestratorTest {
 
         // Force the state transition logic to throw an exception when it receives an unhandled type
         org.mockito.Mockito.doThrow(new IllegalStateException("Unhandled agent type"))
-                .when(spiedOrchestrator).getNextState(AgentType.CODER);
+                .when(spiedOrchestrator).getNextState(any(AgentType.class));
 
         // Act
         // We expect the loop to throw an exception, which we catch and verify.
