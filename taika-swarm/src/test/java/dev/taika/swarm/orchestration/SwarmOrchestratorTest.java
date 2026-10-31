@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.file.Path;
@@ -17,6 +18,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -49,6 +51,69 @@ class SwarmOrchestratorTest {
 
         // Assert
         assertEquals(SwarmStatus.SUCCESS, result.status());
+    }
+
+    @Test
+    void generateRobotTests_shouldRetryAndSucceedWhenDryRunFailsInitially() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Generated tests", List.of(), "Log output");
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
+
+        // 1. iteration fails dry-run, 2. iteration passes
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.DryRunResult(false, "Syntax error in .robot file"))
+                .doReturn(new SwarmOrchestrator.DryRunResult(true, "Dry run passed"))
+                .when(spiedOrchestrator).executeRobotDryRun(fakePath);
+
+        // Act
+        SwarmResult result = spiedOrchestrator.generateRobotTests(fakePath, 3);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+        assertEquals(2, result.invocationHistory().size());
+        assertTrue(result.finalSummary().contains("in 2 iteration(s)"));
+    }
+
+    @Test
+    void generateRobotTests_shouldFailWhenMaxLoopsReached() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Generated tests", List.of(), "Log output");
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.DryRunResult(false, "Persistent keyword error"))
+                .when(spiedOrchestrator).executeRobotDryRun(fakePath);
+
+        // Act
+        SwarmResult result = spiedOrchestrator.generateRobotTests(fakePath, 3);
+
+        // Assert
+        assertEquals(SwarmStatus.MAX_ITERATIONS_REACHED, result.status());
+        assertEquals(3, result.invocationHistory().size());
+        assertTrue(result.finalSummary().contains("did not succeed within 3 iterations"));
+    }
+
+    @Test
+    void generateRobotTests_shouldHandleAgentExecutionException() {
+        // Arrange
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString()))
+                .thenThrow(new RuntimeException("Model connectivity timeout"));
+
+        // Act
+        SwarmResult result = swarmOrchestrator.generateRobotTests(fakePath, 3);
+
+        // Assert
+        assertEquals(SwarmStatus.MAX_ITERATIONS_REACHED, result.status());
+        assertTrue(result.finalSummary().contains("Execution failed: Model connectivity timeout"));
+    }
+
+    @Test
+    void executeRobotDryRun_shouldReturnFailureWhenNoRobotFilesFound(@TempDir Path tempDir) {
+        // Act
+        SwarmOrchestrator.DryRunResult result = swarmOrchestrator.executeRobotDryRun(tempDir);
+
+        // Assert
+        assertFalse(result.passed());
+        assertTrue(result.output().contains("No .robot files were found"));
     }
 
     @Test
