@@ -10,6 +10,17 @@ The primary service used by external modules (like `taika-cli`) to start and mon
         * `projectPath` (Path): The absolute path to the root of the target project to be modified/analyzed.
         * `mainObjective` (String): The high-level objective of the operation (e.g., "Add an authentication service and ensure 100% test coverage").
     * **Output:** A `SwarmResult` DTO containing the final outcome of the entire execution chain.
+* **Method:** `public SwarmResult generateRobotTests(Path projectPath, int maxLoops)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory.
+        * `maxLoops` (int): Maximum self-healing dry-run iterations.
+    * **Output:** A `SwarmResult` confirming generation and dry-run validation of Robot Framework test suites.
+* **Method:** `public SwarmResult generateCode(Path projectPath, int maxLoops, String objective)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory containing specification files.
+        * `maxLoops` (int): Maximum compile/test self-healing cycles per phase.
+        * `objective` (String): Optional custom goal or requirement.
+    * **Output:** A `SwarmResult` DTO confirming completion of the 7-step deterministic TDD workflow (Unit tests + Dummy stubs -> Verification -> Production implementation -> Final validation report). Validates that both unit tests and any existing Robot Framework tests pass in both verification phases.
 
 ### Supporting Data Structures
 

@@ -57,6 +57,10 @@ public class AgentService {
             var readRequest = new FileSystemReader.ReadRequest(projectPath.toAbsolutePath().toString(), globPatterns);
             Map<String, String> files = fileSystemReader.readAll(readRequest);
             context = files.entrySet().stream()
+                    .filter(entry -> !entry.getKey().contains("/target/") && !entry.getKey().contains("\\target\\")
+                            && !entry.getKey().contains("/.git/") && !entry.getKey().contains("\\.git\\")
+                            && !entry.getKey().contains("/node_modules/") && !entry.getKey().contains("\\node_modules\\")
+                            && !entry.getKey().endsWith(".class") && !entry.getKey().endsWith(".jar"))
                     .map(entry -> "--- " + entry.getKey() + " ---\n" + entry.getValue())
                     .collect(Collectors.joining("\n\n"));
         } catch (Exception e) { // Catching a broader exception class for simplicity
@@ -95,7 +99,7 @@ public class AgentService {
                 UUID.randomUUID().toString(),
                 "SUCCESS",
                 "Task completed. See execution log for details.",
-                java.util.List.of(), // Placeholder
+                toolRegistry.getWrittenFiles(),
                 responseContent
         );
     }
@@ -150,6 +154,63 @@ public class AgentService {
 
                 Missing Number In Password Fails
                     Validate Credentials    user@lumo.ws    NoNumberPass  INVALID
+                """;
+        }
+
+        if (agentType == AgentType.UNIT_TESTER) {
+            return """
+                You are a specialized Unit Testing & Test-Driven Development (TDD) Engineer.
+                Your responsibility is to write clean, standard unit tests based on the specification, and minimal dummy implementations with explicit TODO comments.
+                
+                STRICT RULES:
+                1. If Java project (pom.xml exists): Write JUnit 5 tests under `src/test/java/...`.
+                   If Vue / TypeScript project (package.json exists): Write Vitest / Vue Test Utils tests under `tests/unit/...` or `src/...`.
+                2. CRITICAL TDD RULE: Unit tests MUST test the REAL specification requirements defined in `api.md` and `context.md`.
+                   - NEVER write tests that test dummy behavior or expect dummy placeholder error messages!
+                   - Tests must assert the TRUE expected behavior according to the API contract (e.g. valid inputs are valid, invalid inputs return the specific errors defined in api.md).
+                   - NEVER assert exact error counts or list sizes (e.g. NEVER use `assertEquals(3, errors.size())` or `hasSize(3)`). Multiple validation rules can trigger simultaneously.
+                     Instead, always assert: `assertFalse(result.isValid());` and `assertTrue(result.getErrors().contains("Expected error"));`
+                3. Create minimal dummy production classes or stubs (with default return values or simple logic) so that the code compiles, unit tests pass, and any existing Robot Framework tests pass.
+                4. Mark all dummy/stub code with explicit comments: `// TODO: [explain why this is a dummy stub and what full implementation is needed]`.
+                5. KISS JAVA VALIDATION RULES:
+                   - DO NOT use complex regular expressions or escape characters (`\\d`, `\\.`, `\\\\.`). They break compiler escaping!
+                   - To check digits: use `password.chars().anyMatch(Character::isDigit)`
+                   - To check uppercase: use `password.chars().anyMatch(Character::isUpperCase)`
+                   - To check email: use simple string checks (e.g. `email.contains("@") && email.contains(".") && !email.startsWith("@") && !email.endsWith(".")`)
+                6. CRITICAL TOOL CALL MANDATE:
+                   - You MUST use the `fileSystemWriter` tool for EVERY file you create or modify (e.g. pom.xml, classes, test classes).
+                   - NEVER output Java source code or markdown code blocks in your final text response. You MUST invoke `fileSystemWriter` first.
+                   - In your final text response, provide ONLY a brief summary of the test cases and files created.
+                """;
+        }
+
+        if (agentType == AgentType.CODER) {
+            return """
+                You are a world-class software engineer responsible for implementing production code.
+                
+                STRICT RULES:
+                1. Inspect existing source code for all `TODO:` comments and dummy implementations created by the test phase.
+                2. Implement full, robust production logic meeting all requirements in `context.md` and `api.md`, replacing the dummy stubs.
+                3. Remove resolved `TODO:` comments once full production logic is implemented.
+                4. Ensure all valid unit tests and Robot Framework tests pass. If an existing unit test asserted dummy-specific behavior that contradicts api.md, you may adjust the test assertion to match the specification.
+                5. KISS JAVA VALIDATION RULES:
+                   - DO NOT use complex regular expressions or escape characters (`\\d`, `\\.`, `\\\\.`). They break compiler escaping!
+                   - To check digits: use `password.chars().anyMatch(Character::isDigit)`
+                   - To check uppercase: use `password.chars().anyMatch(Character::isUpperCase)`
+                   - To check email: use simple string checks (e.g. `email.contains("@") && email.contains(".") && !email.startsWith("@") && !email.endsWith(".")`)
+                6. CRITICAL TOOL CALL MANDATE:
+                   - You MUST call `fileSystemWriter` for EVERY file you modify.
+                   - NEVER output file contents directly in your text response.
+                   - In your final text response, summarize which components you implemented and which TODOs were resolved.
+                """;
+        }
+
+        if (agentType == AgentType.VALIDATOR) {
+            return """
+                You are a Quality Gate and Verification Engineer.
+                Your task is to review the code and tests against context.md, api.md, and README.md.
+                CRITICAL RULE: NEVER modify or overwrite README.md, context.md, or api.md! Those are immutable specification files defining the project requirements.
+                In your final text response, provide a concise summary of the verification status, satisfied requirements, and test results. Do NOT use fileSystemWriter on specification files.
                 """;
         }
 

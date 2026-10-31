@@ -11,7 +11,10 @@ import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.nio.file.Path;
 
@@ -25,6 +28,7 @@ public class ToolRegistry {
     private static final Logger logger = LoggerFactory.getLogger(ToolRegistry.class);
 
     private final List<ToolCallback> toolCallbacks;
+    private final List<String> writtenFiles = new ArrayList<>();
 
     public ToolRegistry(FileSystemReader fileSystemReader,
                         FileSystemWriter fileSystemWriter,
@@ -34,16 +38,27 @@ public class ToolRegistry {
 
         this.toolCallbacks = new ArrayList<>();
 
-        // Wrap each tool service as a FunctionCallback and add it to the registry.
+        // Wrap each tool service as a FunctionCallback returning structured Map for Google GenAI JSON parsing.
         toolCallbacks.add(FunctionToolCallback.builder("fileSystemReader", (FileSystemReader.ReadRequest request) -> {
                     // Ensure the root path for reading is always within the project path
                     Path safePath = projectPath.resolve(request.rootPath()).normalize();
                     logger.info("TOOL CALL: fileSystemReader | Safe Path: {}", safePath);
                     try {
-                        return fileSystemReader.readAll(new FileSystemReader.ReadRequest(safePath.toString(), request.globPatterns()));
-                    } catch (IOException e) {
+                        Map<String, String> rawFiles = fileSystemReader.readAll(new FileSystemReader.ReadRequest(safePath.toString(), request.globPatterns()));
+                        Map<String, String> filteredFiles = new HashMap<>();
+                        for (Map.Entry<String, String> entry : rawFiles.entrySet()) {
+                            String key = entry.getKey();
+                            if (!key.contains("/target/") && !key.contains("\\target\\")
+                                    && !key.contains("/.git/") && !key.contains("\\.git\\")
+                                    && !key.contains("/node_modules/") && !key.contains("\\node_modules\\")
+                                    && !key.endsWith(".class") && !key.endsWith(".jar")) {
+                                filteredFiles.put(key, entry.getValue());
+                            }
+                        }
+                        return Map.of("status", "SUCCESS", "files", filteredFiles);
+                    } catch (Exception e) {
                         logger.error("TOOL ERROR: fileSystemReader failed.", e);
-                        throw new RuntimeException(e);
+                        return Map.of("status", "ERROR", "message", String.valueOf(e.getMessage()));
                     }
                 })
                 .description("Recursively finds and reads files matching glob patterns.")
@@ -55,10 +70,12 @@ public class ToolRegistry {
                     logger.info("TOOL CALL: fileSystemWriter | Absolute Path: {}", absolutePath);
                     try {
                         // Create a new, safe request with the absolute path.
-                        return fileSystemWriter.write(new FileSystemWriter.WriteRequest(absolutePath.toString(), request.content()));
-                    } catch (IOException e) {
+                        writtenFiles.add(absolutePath.toString());
+                        String writeResult = fileSystemWriter.write(new FileSystemWriter.WriteRequest(absolutePath.toString(), request.content()));
+                        return Map.of("status", "SUCCESS", "message", writeResult);
+                    } catch (Exception e) {
                         logger.error("TOOL ERROR: fileSystemWriter failed.", e);
-                        throw new RuntimeException(e);
+                        return Map.of("status", "ERROR", "message", String.valueOf(e.getMessage()));
                     }
                 })
                 .description("Writes or overwrites content to a specified file.")
@@ -70,10 +87,11 @@ public class ToolRegistry {
                     logger.info("TOOL CALL: mavenExecutor | Absolute Path: {} | Goals: {}", absolutePath, String.join(" ", request.goals()));
                     try {
                         // Create a new, safe request with the absolute path.
-                        return mavenExecutor.execute(new MavenExecutor.ExecuteRequest(absolutePath.toString(), request.goals()));
-                    } catch (IOException | InterruptedException e) {
+                        String output = mavenExecutor.execute(new MavenExecutor.ExecuteRequest(absolutePath.toString(), request.goals()));
+                        return Map.of("status", "SUCCESS", "output", output != null ? output : "");
+                    } catch (Exception e) {
                         logger.error("TOOL ERROR: mavenExecutor failed.", e);
-                        throw new RuntimeException(e);
+                        return Map.of("status", "ERROR", "message", String.valueOf(e.getMessage()));
                     }
                 })
                 .description("Executes Maven commands in a specified project directory.")
@@ -85,10 +103,11 @@ public class ToolRegistry {
                     logger.info("TOOL CALL: fileReader | Absolute Path: {}", absolutePath);
                     try {
                         // Create a new, safe request with the absolute path.
-                        return fileReader.readFile(new FileReader.ReadFileRequest(absolutePath.toString()));
-                    } catch (IOException e) {
+                        String content = fileReader.readFile(new FileReader.ReadFileRequest(absolutePath.toString()));
+                        return Map.of("status", "SUCCESS", "content", content);
+                    } catch (Exception e) {
                         logger.error("TOOL ERROR: fileReader failed.", e);
-                        throw new RuntimeException(e);
+                        return Map.of("status", "ERROR", "message", String.valueOf(e.getMessage()));
                     }
                 })
                 .description("Reads the content of a single file.")
@@ -97,5 +116,9 @@ public class ToolRegistry {
 
     public List<ToolCallback> getToolCallbacks() {
         return toolCallbacks;
+    }
+
+    public List<String> getWrittenFiles() {
+        return Collections.unmodifiableList(writtenFiles);
     }
 }

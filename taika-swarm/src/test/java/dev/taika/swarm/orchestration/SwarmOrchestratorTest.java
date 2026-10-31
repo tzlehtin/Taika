@@ -117,6 +117,110 @@ class SwarmOrchestratorTest {
     }
 
     @Test
+    void generateCode_shouldSucceedWhenAllPhasesPass() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log");
+        when(agentService.executeTask(eq(fakePath), any(AgentType.class), anyString())).thenReturn(successResult);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(true, "All tests passed"))
+                .when(spiedOrchestrator).executeUnitTestRun(fakePath);
+
+        // Act
+        SwarmResult result = spiedOrchestrator.generateCode(fakePath, 3);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+        assertTrue(result.finalSummary().contains("Code Generation Complete!"));
+        assertEquals(3, result.invocationHistory().size()); // UNIT_TESTER, CODER, VALIDATOR
+    }
+
+    @Test
+    void generateCode_shouldRetryAndSucceedWhenUnitTestFailsInitially() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log");
+        when(agentService.executeTask(eq(fakePath), any(AgentType.class), anyString())).thenReturn(successResult);
+
+        // 1st unit test run fails, 2nd passes; CODER test run passes
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(false, "Compilation error in stub"))
+                .doReturn(new SwarmOrchestrator.TestRunResult(true, "Tests passed"))
+                .doReturn(new SwarmOrchestrator.TestRunResult(true, "Production tests passed"))
+                .when(spiedOrchestrator).executeUnitTestRun(fakePath);
+
+        // Act
+        SwarmResult result = spiedOrchestrator.generateCode(fakePath, 3);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+        assertEquals(4, result.invocationHistory().size()); // UNIT_TESTER x2, CODER x1, VALIDATOR x1
+    }
+
+    @Test
+    void generateCode_shouldFailWhenUnitTestPhaseExceedsMaxLoops() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log");
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.UNIT_TESTER), anyString())).thenReturn(successResult);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(false, "Persistent test failure"))
+                .when(spiedOrchestrator).executeUnitTestRun(fakePath);
+
+        // Act
+        SwarmResult result = spiedOrchestrator.generateCode(fakePath, 3);
+
+        // Assert
+        assertEquals(SwarmStatus.MAX_ITERATIONS_REACHED, result.status());
+        assertTrue(result.finalSummary().contains("Unit test phase did not pass verification"));
+    }
+
+    @Test
+    void executeUnitTestRun_shouldReturnFailureWhenNoProjectBuildFilesFound(@TempDir Path tempDir) {
+        // Act
+        SwarmOrchestrator.TestRunResult result = swarmOrchestrator.executeUnitTestRun(tempDir);
+
+        // Assert
+        assertFalse(result.passed());
+        assertTrue(result.output().contains("No pom.xml or package.json found"));
+    }
+
+    @Test
+    void executeUnitTestRun_shouldFailWhenRobotTestsFail() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(true, "Maven tests passed"))
+                .when(spiedOrchestrator).runBuildToolTests(fakePath);
+        org.mockito.Mockito.doReturn(fakePath.resolve("src/test/robotframework/credentials_validation.robot"))
+                .when(spiedOrchestrator).findRobotFile(fakePath);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(false, "1 test failed"))
+                .when(spiedOrchestrator).executeRobotRun(eq(fakePath), any(Path.class));
+
+        // Act
+        SwarmOrchestrator.TestRunResult result = spiedOrchestrator.executeUnitTestRun(fakePath);
+
+        // Assert
+        assertFalse(result.passed());
+        assertTrue(result.output().contains("Robot Framework tests failed"));
+    }
+
+    @Test
+    void executeUnitTestRun_shouldPassWhenBothUnitAndRobotTestsPass() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(true, "Maven tests passed"))
+                .when(spiedOrchestrator).runBuildToolTests(fakePath);
+        org.mockito.Mockito.doReturn(fakePath.resolve("src/test/robotframework/credentials_validation.robot"))
+                .when(spiedOrchestrator).findRobotFile(fakePath);
+        org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(true, "All robot tests passed"))
+                .when(spiedOrchestrator).executeRobotRun(eq(fakePath), any(Path.class));
+
+        // Act
+        SwarmOrchestrator.TestRunResult result = spiedOrchestrator.executeUnitTestRun(fakePath);
+
+        // Assert
+        assertTrue(result.passed());
+        assertTrue(result.output().contains("All robot tests passed"));
+    }
+
+    @Test
     void orchestrate_shouldSucceedAfterFullCycle() {
         // Arrange
         var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Success", List.of(), "");
