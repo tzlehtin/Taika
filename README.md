@@ -92,59 +92,59 @@ mvn clean install
 
 ---
 
-## Työnkulku ja ajojärjestys (Workflow & Execution Order)
+## Workflow & Execution Order
 
-Kun kehität tai ylläpidät projektia Taikalla, suorita komennot seuraavassa järjestyksessä projektin juuresta käsin:
+When developing or maintaining a project with Taika, execute the commands in the following order from the Taika root directory:
 
-### Vaihe 1: Alkuperäinen generointi (Uusi projekti)
+### Phase 1: Initial Generation (New Project)
 
-Varmista ensin, että kohdeprojektissa on vähintään `README.md`, `context.md` ja `api.md`.
+Ensure that the target project root contains at least `README.md`, `context.md`, and `api.md`.
 
-1. **Luo hyväksymistestit (`gen-robots`)**:
+1. **Generate Acceptance Tests (`gen-robots`)**:
    ```bash
    java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path /path/to/project --max-loops 3
    ```
-   *Luo hyväksymistestit kansioon `robots/credentials_validation.robot` ja varmistaa ne `robot --dryrun` -tarkistuksella.*
+   *Generates acceptance test suites in `robots/credentials_validation.robot` and validates them with `robot --dryrun`.*
 
-2. **Luo koodi ja yksikkötestit TDD-silmukalla (`gen-code`)**:
+2. **Generate Code and Unit Tests with TDD Loop (`gen-code`)**:
    ```bash
    java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path /path/to/project --max-loops 3
    ```
-   *Generoi yksikkötestit, dummy-koodit ja tuotantototeutuksen. Varmistaa, että sekä yksikkötestit että Robot-testit menevät läpi.*
+   *Generates unit tests, dummy stubs, and production implementation. Ensures both unit tests and Robot tests pass.*
 
 ---
 
-### Vaihe 2: Laadunvarmistus ja `task.md`-jatkokehityssilmukka
+### Phase 2: Quality Assurance & `task.md` Evolution Loop
 
-3. **Auditoi arkkitehtuuri ja testien kattavuus (`audit`)**:
+3. **Audit Architecture & Test Effectiveness (`audit`)**:
    ```bash
    java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path /path/to/project
    ```
-   - **Jos tulos on `AUDIT STATUS: ACTION_REQUIRED`**: Projektin juureen syntyy `task.md`. Siirry vaiheeseen 4.
-   - **Jos tulos on `AUDIT STATUS: PASSED`**: Kaikki laatuvaatimukset täyttyvät ja työ on valmis!
+   - **If the outcome is `AUDIT STATUS: ACTION_REQUIRED`**: A `task.md` file is generated in the project root outlining required fixes. Proceed to Step 4.
+   - **If the outcome is `AUDIT STATUS: PASSED`**: All quality criteria are met and the task is complete!
 
-4. **Korjaa koodi ja testit `task.md`:n mukaisesti**:
-   Jos `task.md` vaatii muutoksia hyväksymistesteihin, aja ensin:
+4. **Remediate Code and Tests per `task.md`**:
+   If `task.md` requires changes to acceptance tests, update them first:
    ```bash
    java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path /path/to/project --max-loops 3
    ```
-   Päivitä koodi (Taika tunnistaa `Task Mode: ACTIVE`):
+   Update the code (Taika will automatically detect `Task Mode: ACTIVE`):
    ```bash
    java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path /path/to/project --max-loops 3
    ```
-   *Korjaa toteutuksen ja synkronoi samalla `README.md`-, `context.md`- ja `api.md`-määrittelyt.*
+   *Fixes the implementation and synchronizes `README.md`, `context.md`, and `api.md` specifications accordingly.*
 
-5. **Aja auditointi uudelleen**:
+5. **Re-run the Audit**:
    ```bash
    java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path /path/to/project
    ```
-   *Toista vaiheita 4 ja 5, kunnes audit ilmoittaa `AUDIT STATUS: PASSED`. Tällöin vanhentunut `task.md` poistetaan automaattisesti.*
+   *Repeat steps 4 and 5 until the audit reports `AUDIT STATUS: PASSED`. Once passed, the obsolete `task.md` is automatically removed.*
 
 ---
 
-## Komentoluettelo (CLI Reference)
+## CLI Reference
 
-* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path <polku> --max-loops 3`
-* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path <polku> --max-loops 3`
-* **`audit`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path <polku>`
-* **`execution`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar execution --path <polku> --objective "<tavoite>"`
+* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path <path> --max-loops 3`
+* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path <path> --max-loops 3`
+* **`audit`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path <path>`
+* **`execution`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar execution --path <path> --objective "<goal>"`
