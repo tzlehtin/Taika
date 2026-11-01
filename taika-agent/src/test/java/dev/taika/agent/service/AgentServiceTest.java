@@ -147,4 +147,69 @@ class AgentServiceTest {
         assertEquals("SUCCESS", result.status());
         assertEquals("Robot test suite generated.", result.executionLog());
     }
+
+    @Test
+    void executeTask_shouldSucceedWithAuditorRoleAndFilterBinaryFiles() throws IOException {
+        // Arrange
+        when(chatClientBuilder.build()).thenReturn(chatClient);
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.messages(any(), any())).thenReturn(requestSpec);
+        when(requestSpec.toolCallbacks(any(List.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        ChatResponse mockChatResponse = mock(ChatResponse.class);
+        Generation mockGeneration = mock(Generation.class);
+        when(callResponseSpec.chatResponse()).thenReturn(mockChatResponse);
+        when(mockChatResponse.getResult()).thenReturn(mockGeneration);
+        when(mockGeneration.getOutput()).thenReturn(new AssistantMessage("AUDIT STATUS: PASSED"));
+
+        // Simulate file reading returning valid source and ignored binary/target files
+        Map<String, String> fakeFiles = Map.of(
+                "src/main/java/Service.java", "public class Service {}",
+                "target/classes/Service.class", "binary_content",
+                ".git/config", "git_content"
+        );
+        when(fileSystemReader.readAll(any(FileSystemReader.ReadRequest.class))).thenReturn(fakeFiles);
+
+        // Act
+        AgentResult result = agentService.executeTask(fakePath, AgentType.AUDITOR, "Audit repository");
+
+        // Assert
+        assertEquals("SUCCESS", result.status());
+        assertEquals("AUDIT STATUS: PASSED", result.executionLog());
+    }
+
+    @Test
+    void executeTask_shouldSucceedWithValidatorRole() throws IOException {
+        // Arrange
+        when(chatClientBuilder.build()).thenReturn(chatClient);
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.messages(any(), any())).thenReturn(requestSpec);
+        when(requestSpec.toolCallbacks(any(List.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        ChatResponse mockChatResponse = mock(ChatResponse.class);
+        Generation mockGeneration = mock(Generation.class);
+        when(callResponseSpec.chatResponse()).thenReturn(mockChatResponse);
+        when(mockChatResponse.getResult()).thenReturn(mockGeneration);
+        when(mockGeneration.getOutput()).thenReturn(new AssistantMessage("Verification complete."));
+
+        Map<String, String> fakeFiles = Map.of("README.md", "Docs");
+        when(fileSystemReader.readAll(any(FileSystemReader.ReadRequest.class))).thenReturn(fakeFiles);
+
+        // Act
+        AgentResult result = agentService.executeTask(fakePath, AgentType.VALIDATOR, "Verify requirements");
+
+        // Assert
+        assertEquals("SUCCESS", result.status());
+        assertEquals("Verification complete.", result.executionLog());
+    }
 }

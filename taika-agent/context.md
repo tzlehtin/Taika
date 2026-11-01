@@ -1,10 +1,10 @@
 # Module Context: taika-agent
 
 ## Responsibility
-This module is the "brain" of the Taika system. It integrates with the Google Vertex AI Gemini API via Spring AI's `ChatClient` to execute structured development tasks. It has zero direct access to the host file system or OS processes; it must act exclusively through the tools exposed by the `taika-tools` module[cite: 2].
+This module is the "brain" of the Taika system. It integrates with Google Gemini via Spring AI's official `Google GenAI` starter and `ChatClient` to execute structured development tasks. It has zero direct access to the host file system or OS processes; it must act exclusively through the tools exposed by the `taika-tools` module.
 
 ## Dependencies
-*   `org.springframework.ai:spring-ai-vertex-ai-gemini-starter`: Core Spring AI integration[cite: 2].
+*   `org.springframework.ai:spring-ai-starter-model-google-genai`: Core Spring AI integration with Google GenAI SDK.
 *   `dev.taika:taika-tools`: Provides the physical "hands" (file I/O, process execution) via its public API (`../taika-tools/api.md`)[cite: 2].
 *   `dev.taika:taika-api`: Shared data structures, DTOs, and the `AgentType` role registry[cite: 2, 3].
 

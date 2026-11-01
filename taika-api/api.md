@@ -9,6 +9,7 @@ Defines the rigid operational roles and structural boundaries assigned to swarm 
 *   `CODER`: Responsible for translating specifications into production-ready Java code under `src/main/java`. Forbidden from touching tests.
 *   `TESTER`: Responsible for writing and maintaining JUnit test classes under `src/test/java` to satisfy code coverage thresholds.
 *   `VALIDATOR`: Responsible for guarding the quality gate. Parses compiler logs and coverage metrics to issue precise change loops.
+*   `AUDITOR`: Responsible for deep architectural, code quality, and test effectiveness auditing. Generates task.md and quality reports.
 
 ## Data Structure: AgentResult
 An immutable DTO (Java Record) that represents the final output of an agent's execution sequence.
