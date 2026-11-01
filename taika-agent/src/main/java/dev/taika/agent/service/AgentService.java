@@ -188,6 +188,11 @@ public class AgentService {
                      * In Java: Must execute a real binary or CLI runner (via Process library) or live HTTP server.
                      * In Vue: Must verify genuine contract execution or real component rendering, never standalone parameter loops.
 
+                AUDITOR ROLE BOUNDARY MANDATE:
+                - You are an AUDITOR, NOT A CODER.
+                - You are STRICTLY FORBIDDEN from modifying production source files or test files directly!
+                - You may ONLY use the `fileSystemWriter` tool to create `task.md` in the project root directory when ACTION_REQUIRED.
+
                 FILE READING RESTRICTION:
                 - NEVER invoke fileSystemReader on the entire project root or 'node_modules/' or 'target/'.
                 - Inspect only specific source files (e.g. src/, tests/, robots/, package.json, pom.xml) using fileReader.

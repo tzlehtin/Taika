@@ -154,7 +154,7 @@ public class SwarmOrchestrator {
             return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), summary);
         } catch (Exception e) {
             logger.error("Error executing AUDITOR for project '{}'", projectPath, e);
-            String errorSummary = "Audit failed: " + e.getMessage();
+            String errorSummary = "Audit failed: " + getRootCauseMessage(e);
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.MAX_ITERATIONS_REACHED, errorSummary, thread);
             return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), errorSummary);
         }
@@ -190,6 +190,10 @@ public class SwarmOrchestrator {
                 } else {
                     sb.append("Coverage Report: JaCoCo CSV was not generated.\n");
                 }
+
+                // Run Static Analysis (SpotBugs)
+                String staticAnalysis = runSpotBugsAnalysis(projectPath);
+                sb.append(staticAnalysis).append("\n");
             } catch (Exception e) {
                 sb.append("Maven execution error: ").append(e.getMessage()).append("\n");
             }
@@ -200,6 +204,10 @@ public class SwarmOrchestrator {
             sb.append("NPM Test Output Summary:\n").append(npmResult.output().length() > 500
                     ? npmResult.output().substring(0, 500) + "... [truncated]"
                     : npmResult.output()).append("\n");
+
+                // Run Static Analysis / Typecheck for Vue / TypeScript
+                String staticAnalysis = runNpmStaticAnalysis(projectPath);
+                sb.append(staticAnalysis).append("\n");
         } else {
             sb.append("No pom.xml or package.json found in project directory.\n");
         }
@@ -210,6 +218,69 @@ public class SwarmOrchestrator {
             sb.append("Robot Acceptance Tests: ").append(robotResult.passed() ? "PASSED" : "FAILED").append("\n");
         } else {
             sb.append("Robot Acceptance Tests: None found.\n");
+        }
+
+        return sb.toString();
+    }
+
+    protected String runSpotBugsAnalysis(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            logger.info("Executing SpotBugs static analysis on: {}", projectPath);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "mvn", "com.github.spotbugs:spotbugs-maven-plugin:4.8.6.6:check",
+                    "-Dspotbugs.failOnError=false", "-B"
+            );
+            pb.directory(projectPath.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append("\n");
+            }
+            process.waitFor();
+
+            Path spotbugsXml = projectPath.resolve("target/spotbugsXml.xml");
+            if (Files.exists(spotbugsXml)) {
+                String xml = Files.readString(spotbugsXml);
+                int bugCount = (xml.split("<BugInstance ").length) - 1;
+                if (bugCount > 0) {
+                    sb.append("Static Analysis (SpotBugs): FAILED (").append(bugCount).append(" bug(s) detected)\n");
+                    // Extract bug types and messages for the agent
+                    xml.lines()
+                            .filter(line -> line.contains("<BugInstance ") || line.contains("<LongMessage>"))
+                            .limit(10)
+                            .forEach(line -> sb.append("  - ").append(line.trim()).append("\n"));
+                } else {
+                    sb.append("Static Analysis (SpotBugs): PASSED (0 bugs detected)\n");
+                }
+            } else {
+                sb.append("Static Analysis (SpotBugs): PASSED (No bugs or report generated)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Static Analysis (SpotBugs): Could not execute (").append(e.getMessage()).append(")\n");
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runNpmStaticAnalysis(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Static Analysis (TypeCheck / Lint):\n");
+
+        // Run TypeScript typecheck if tsconfig exists
+        if (Files.exists(projectPath.resolve("tsconfig.json"))) {
+            logger.info("Executing TypeScript static typecheck on: {}", projectPath);
+            TestRunResult tscResult = runProcess(projectPath, "npx", "vue-tsc", "--noEmit");
+            if (!tscResult.passed()) {
+                // Fallback to standard tsc
+                tscResult = runProcess(projectPath, "npx", "tsc", "--noEmit");
+            }
+            sb.append("- Typecheck Status: ").append(tscResult.passed() ? "PASSED" : "FAILED").append("\n");
+            if (!tscResult.passed() && !tscResult.output().isBlank()) {
+                String snippet = tscResult.output().length() > 400 ? tscResult.output().substring(0, 400) + "... [truncated]" : tscResult.output();
+                sb.append("  Details:\n").append(snippet).append("\n");
+            }
         }
 
         return sb.toString();
@@ -311,8 +382,8 @@ public class SwarmOrchestrator {
                 );
             } catch (Exception e) {
                 logger.error("Error executing UNIT_TESTER for project '{}'", projectPath, e);
-                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in unit test phase: " + e.getMessage(), thread);
-                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in unit test phase: " + e.getMessage());
+                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in unit test phase: " + getRootCauseMessage(e), thread);
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in unit test phase: " + getRootCauseMessage(e));
             }
         }
 
@@ -367,8 +438,8 @@ public class SwarmOrchestrator {
                 );
             } catch (Exception e) {
                 logger.error("Error executing CODER for project '{}'", projectPath, e);
-                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in coder phase: " + e.getMessage(), thread);
-                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in coder phase: " + e.getMessage());
+                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in coder phase: " + getRootCauseMessage(e), thread);
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in coder phase: " + getRootCauseMessage(e));
             }
         }
 
@@ -410,8 +481,8 @@ public class SwarmOrchestrator {
             return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), finalReport);
         } catch (Exception e) {
             logger.error("Error executing VALIDATOR for project '{}'", projectPath, e);
-            writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in validator phase: " + e.getMessage(), thread);
-            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in validator phase: " + e.getMessage());
+            writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in validator phase: " + getRootCauseMessage(e), thread);
+            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in validator phase: " + getRootCauseMessage(e));
         }
     }
 
@@ -568,8 +639,8 @@ public class SwarmOrchestrator {
                 );
             } catch (Exception e) {
                 logger.error("Error executing ROBOT_TESTER for project '{}'", projectPath, e);
-                writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed: " + e.getMessage(), thread);
-                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed: " + e.getMessage());
+                writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed: " + getRootCauseMessage(e), thread);
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed: " + getRootCauseMessage(e));
             }
         }
 
@@ -577,6 +648,17 @@ public class SwarmOrchestrator {
         writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, failSummary, thread);
         return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(),
                 failSummary);
+    }
+
+    private String getRootCauseMessage(Throwable throwable) {
+        if (throwable == null) return "Unknown error";
+        Throwable root = throwable;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getMessage() != null && !root.getMessage().isBlank()
+                ? root.getMessage()
+                : throwable.getMessage();
     }
 
     void writeHtmlReport(Path projectPath, String fileName, String title, SwarmStatus status, String content, ExecutionThread thread) {

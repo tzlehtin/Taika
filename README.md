@@ -108,7 +108,7 @@ mvn clean install
 ### All-in-One Command (`pipeline`)
 To run the entire automated development cycle (`gen-robots` -> `gen-code` -> `audit`) with a single command:
 ```bash
-java -jar taika-cli/target/taika-cli-0.4.0.jar pipeline --path /path/to/project --max-loops 3
+java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar pipeline --path /path/to/project --max-loops 3
 ```
 If you prefer step-by-step execution, run the commands individually:
 
@@ -120,13 +120,13 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 
 1. **Generate Acceptance Tests (`gen-robots`)**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-robots --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar gen-robots --path /path/to/project --max-loops 3
    ```
    *Generates acceptance test suites in `robots/credentials_validation.robot` and validates them with `robot --dryrun`.*
 
 2. **Generate Code and Unit Tests with TDD Loop (`gen-code`)**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-code --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar gen-code --path /path/to/project --max-loops 3
    ```
    *Generates unit tests, dummy stubs, and production implementation. Ensures both unit tests and Robot tests pass.*
 
@@ -136,7 +136,7 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 
 3. **Audit Architecture & Test Effectiveness (`audit`)**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar audit --path /path/to/project
+   java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar audit --path /path/to/project
    ```
    - **If the outcome is `AUDIT STATUS: ACTION_REQUIRED`**: A `task.md` file is generated in the project root outlining required fixes. Proceed to Step 4.
    - **If the outcome is `AUDIT STATUS: PASSED`**: All quality criteria are met and the task is complete!
@@ -144,17 +144,17 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 4. **Remediate Code and Tests per `task.md`**:
    If `task.md` requires changes to acceptance tests, update them first:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-robots --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar gen-robots --path /path/to/project --max-loops 3
    ```
    Update the code (Taika will automatically detect `Task Mode: ACTIVE`):
    ```bash
-   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-code --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar gen-code --path /path/to/project --max-loops 3
    ```
    *Fixes the implementation and synchronizes `README.md`, `context.md`, and `api.md` specifications accordingly.*
 
 5. **Re-run the Audit**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar audit --path /path/to/project
+   java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar audit --path /path/to/project
    ```
    *Repeat steps 4 and 5 until the audit reports `AUDIT STATUS: PASSED`. Once passed, the obsolete `task.md` is automatically removed.*
 
@@ -162,7 +162,7 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 
 ## CLI Reference
 
-* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-robots --path <path> --max-loops 3`
-* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-code --path <path> --max-loops 3`
-* **`audit`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar audit --path <path>`
-* **`pipeline`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar pipeline --path <path> --max-loops 3`
+* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar gen-robots --path <path> --max-loops 3`
+* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar gen-code --path <path> --max-loops 3`
+* **`audit`**: `java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar audit --path <path>`
+* **`pipeline`**: `java -jar taika-cli/target/taika-cli-0.5.0-SNAPSHOT.jar pipeline --path <path> --max-loops 3`

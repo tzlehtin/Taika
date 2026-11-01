@@ -221,6 +221,27 @@ class SwarmOrchestratorTest {
     }
 
     @Test
+    void runSpotBugsAnalysis_shouldReportPassedWhenNoBugsXmlFound(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runSpotBugsAnalysis(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Static Analysis (SpotBugs)"));
+    }
+
+    @Test
+    void runNpmStaticAnalysis_shouldDetectTsConfigAndExecute(@TempDir Path tempDir) throws java.io.IOException {
+        // Arrange
+        java.nio.file.Files.writeString(tempDir.resolve("tsconfig.json"), "{}");
+
+        // Act
+        String result = swarmOrchestrator.runNpmStaticAnalysis(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Static Analysis (TypeCheck / Lint)"));
+    }
+
+    @Test
     void generateRobotTests_shouldRetryAndSucceedWhenDryRunFailsInitially() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
