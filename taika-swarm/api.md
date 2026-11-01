@@ -25,6 +25,12 @@ The primary service used by external modules (like `taika-cli`) to start and mon
     * **Input:**
         * `projectPath` (Path): The target project directory containing code and specification files.
     * **Output:** A `SwarmResult` DTO confirming completion of the audit, generation of `taika-report-audit.html`, and creation of `task.md`.
+* **Method:** `public SwarmResult pipeline(Path projectPath, int maxLoops, String objective)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory containing specification files.
+        * `maxLoops` (int): Maximum compile/test self-healing cycles per phase.
+        * `objective` (String): Optional custom goal or requirement.
+    * **Output:** A `SwarmResult` DTO executing the sequential pipeline (`gen-robots` -> `gen-code` -> `audit`).
 
 ### Supporting Data Structures
 

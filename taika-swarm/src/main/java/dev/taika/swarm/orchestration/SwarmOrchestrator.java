@@ -15,6 +15,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.util.stream.Stream;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Collections;
 import java.nio.file.Path;
 
@@ -47,6 +50,55 @@ public class SwarmOrchestrator {
     }
 
     /**
+     * Executes the complete automated development pipeline in sequence:
+     * 1. generateRobotTests (Acceptance test generation)
+     * 2. generateCode (TDD Unit tests -> Stubs -> Verification -> Production code -> Validation)
+     * 3. audit (Deep architecture, code quality, test effectiveness, and task.md generation)
+     */
+    public SwarmResult pipeline(Path projectPath) {
+        return pipeline(projectPath, DEFAULT_MAX_CODE_LOOPS, null);
+    }
+
+    public SwarmResult pipeline(Path projectPath, int maxLoops) {
+        return pipeline(projectPath, maxLoops, null);
+    }
+
+    public SwarmResult pipeline(Path projectPath, int maxLoops, String objective) {
+        logger.info("Executing automated pipeline (gen-robots -> gen-code -> audit) for project '{}' with max loops: {}", projectPath, maxLoops);
+
+        // Step 1: gen-robots
+        logger.info("=== PIPELINE STEP 1/3: Generating Robot Framework acceptance tests ===");
+        SwarmResult robotResult = generateRobotTests(projectPath, maxLoops);
+        if (robotResult.status() != SwarmStatus.SUCCESS) {
+            logger.warn("Pipeline halted at step 1 (gen-robots). Status: {}", robotResult.status());
+            return new SwarmResult(robotResult.threadId(), robotResult.status(), robotResult.invocationHistory(),
+                    "Pipeline halted at Step 1 (gen-robots):\n" + robotResult.finalSummary());
+        }
+
+        // Step 2: gen-code
+        logger.info("=== PIPELINE STEP 2/3: Generating code and unit tests with TDD loop ===");
+        SwarmResult codeResult = generateCode(projectPath, maxLoops, objective);
+        if (codeResult.status() != SwarmStatus.SUCCESS) {
+            logger.warn("Pipeline halted at step 2 (gen-code). Status: {}", codeResult.status());
+            return new SwarmResult(codeResult.threadId(), codeResult.status(), codeResult.invocationHistory(),
+                    "Pipeline halted at Step 2 (gen-code):\n" + codeResult.finalSummary());
+        }
+
+        // Step 3: audit
+        logger.info("=== PIPELINE STEP 3/3: Executing quality, architecture, and test effectiveness audit ===");
+        SwarmResult auditResult = audit(projectPath);
+
+        String combinedSummary = String.format(
+                "Pipeline Execution Complete (gen-robots -> gen-code -> audit)!\n\n" +
+                "--- Step 1: Robot Tests ---\nStatus: %s\n\n" +
+                "--- Step 2: Code Generation ---\nStatus: %s\n\n" +
+                "--- Step 3: Audit Result ---\n%s",
+                robotResult.status(), codeResult.status(), auditResult.finalSummary()
+        );
+        return new SwarmResult(auditResult.threadId(), auditResult.status(), auditResult.invocationHistory(), combinedSummary);
+    }
+
+    /**
      * Performs a comprehensive quality, architecture, and test effectiveness audit of the project,
      * generating `taika-report-audit.html` and `task.md`.
      */
@@ -54,15 +106,24 @@ public class SwarmOrchestrator {
         logger.info("Starting audit for project '{}'", projectPath);
         var thread = new ExecutionThread();
 
+        // Execute automated build, test, and code coverage diagnostics before invoking AI
+        String diagnostics = runAuditDiagnostics(projectPath);
+        logger.info("Audit diagnostics collected:\n{}", diagnostics);
+
         String auditTask = """
                 Perform a complete and thorough audit of this project.
+                
+                === OBJECTIVE DETERMINISTIC DIAGNOSTICS (FROM BUILD SYSTEM) ===
+                %s
+                ===============================================================
+                
                 1. Verify architectural integrity against context.md, api.md, and README.md.
-                2. Inspect test suites for TRUE effectiveness vs fake assertions (e.g. Robot tests that assert their own parameters rather than verifying real components).
-                3. Identify all concrete code, design, and specification defects.
+                2. Inspect test suites for TRUE effectiveness vs fake assertions (e.g. Robot tests that assert their own parameters rather than verifying real components, or tests with low branch coverage).
+                3. Identify all concrete code, design, immutability, and specification defects.
                 4. Stopping criteria:
-                   - If code and tests meet quality standards without real defects or fake tests, conclude with 'AUDIT STATUS: PASSED' and DO NOT create `task.md`.
+                   - If code and tests meet quality standards (including high branch coverage and no fake tests), conclude with 'AUDIT STATUS: PASSED' and DO NOT create `task.md`.
                    - If concrete fixes are required, conclude with 'AUDIT STATUS: ACTION_REQUIRED' and use `fileSystemWriter` to create `task.md` in the project root.
-                """;
+                """.formatted(diagnostics);
 
         try {
             AgentResult auditResult = agentService.executeTask(projectPath, AgentType.AUDITOR, auditTask);
@@ -87,7 +148,7 @@ public class SwarmOrchestrator {
                 taskMdNotice = "\nAudit Result: CLEAN (No `task.md` required. Code and tests meet quality standards).";
             }
 
-            String summary = "Project Audit Complete!\n" + taskMdNotice + "\n\n=== Audit Findings ===\n" + auditResult.executionLog();
+            String summary = "Project Audit Complete!\n" + taskMdNotice + "\n\n=== Diagnostics ===\n" + diagnostics + "\n\n=== Audit Findings ===\n" + auditResult.executionLog();
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.SUCCESS, summary, thread);
 
             return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), summary);
@@ -96,6 +157,86 @@ public class SwarmOrchestrator {
             String errorSummary = "Audit failed: " + e.getMessage();
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.MAX_ITERATIONS_REACHED, errorSummary, thread);
             return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), errorSummary);
+        }
+    }
+
+    protected String runAuditDiagnostics(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        boolean hasPom = Files.exists(projectPath.resolve("pom.xml"));
+        boolean hasPackageJson = Files.exists(projectPath.resolve("package.json"));
+
+        if (hasPom) {
+            sb.append("Target Platform: Java / Maven\n");
+            try {
+                logger.info("Executing Maven test with JaCoCo coverage on: {}", projectPath);
+                ProcessBuilder pb = new ProcessBuilder(
+                        "mvn", "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",
+                        "test", "org.jacoco:jacoco-maven-plugin:0.8.12:report", "-B"
+                );
+                pb.directory(projectPath.toFile());
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                StringBuilder output = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) output.append(line).append("\n");
+                }
+                int exitCode = p.waitFor();
+                sb.append("Maven Test Status: ").append(exitCode == 0 ? "PASSED" : "FAILED").append("\n");
+
+                Path csvReport = projectPath.resolve("target/site/jacoco/jacoco.csv");
+                if (Files.exists(csvReport)) {
+                    sb.append(parseJaCoCoCsv(csvReport)).append("\n");
+                } else {
+                    sb.append("Coverage Report: JaCoCo CSV was not generated.\n");
+                }
+            } catch (Exception e) {
+                sb.append("Maven execution error: ").append(e.getMessage()).append("\n");
+            }
+        } else if (hasPackageJson) {
+            sb.append("Target Platform: Vue / TypeScript (npm)\n");
+            TestRunResult npmResult = runBuildToolTests(projectPath);
+            sb.append("NPM Test Status: ").append(npmResult.passed() ? "PASSED" : "FAILED").append("\n");
+            sb.append("NPM Test Output Summary:\n").append(npmResult.output().length() > 500
+                    ? npmResult.output().substring(0, 500) + "... [truncated]"
+                    : npmResult.output()).append("\n");
+        } else {
+            sb.append("No pom.xml or package.json found in project directory.\n");
+        }
+
+        Path robotTestFile = findRobotFile(projectPath);
+        if (robotTestFile != null) {
+            TestRunResult robotResult = executeRobotRun(projectPath, robotTestFile);
+            sb.append("Robot Acceptance Tests: ").append(robotResult.passed() ? "PASSED" : "FAILED").append("\n");
+        } else {
+            sb.append("Robot Acceptance Tests: None found.\n");
+        }
+
+        return sb.toString();
+    }
+
+    private String parseJaCoCoCsv(Path csvPath) {
+        try (Stream<String> lines = Files.lines(csvPath)) {
+            long lineMissed = 0, lineCovered = 0;
+            long branchMissed = 0, branchCovered = 0;
+            List<String> list = lines.skip(1).toList();
+            for (String row : list) {
+                String[] cols = row.split(",");
+                if (cols.length >= 9) {
+                    branchMissed += Long.parseLong(cols[5].trim());
+                    branchCovered += Long.parseLong(cols[6].trim());
+                    lineMissed += Long.parseLong(cols[7].trim());
+                    lineCovered += Long.parseLong(cols[8].trim());
+                }
+            }
+            long totalLines = lineMissed + lineCovered;
+            long totalBranches = branchMissed + branchCovered;
+            double linePct = totalLines > 0 ? (lineCovered * 100.0) / totalLines : 100.0;
+            double branchPct = totalBranches > 0 ? (branchCovered * 100.0) / totalBranches : 100.0;
+            return String.format("Coverage Metrics:\n- Line Coverage: %.1f%% (Covered: %d, Missed: %d)\n- Branch Coverage: %.1f%% (Covered: %d, Missed: %d)",
+                    linePct, lineCovered, lineMissed, branchPct, branchCovered, branchMissed);
+        } catch (Exception e) {
+            return "Failed to parse JaCoCo CSV: " + e.getMessage();
         }
     }
 
@@ -302,6 +443,11 @@ public class SwarmOrchestrator {
                 logger.info("Executing Maven test validation on: {}", projectPath);
                 pb = new ProcessBuilder("mvn", "test", "-B");
             } else if (Files.exists(projectPath.resolve("package.json"))) {
+                Path nodeModules = projectPath.resolve("node_modules");
+                if (!Files.exists(nodeModules)) {
+                    logger.info("node_modules not found. Running 'npm install' on: {}", projectPath);
+                    runProcess(projectPath, "npm", "install");
+                }
                 logger.info("Executing npm test validation on: {}", projectPath);
                 pb = new ProcessBuilder("npm", "test");
             } else {
@@ -325,6 +471,24 @@ public class SwarmOrchestrator {
         } catch (Exception e) {
             logger.error("Failed to execute unit test process for project '{}'", projectPath, e);
             return new TestRunResult(false, "System error running test validation: " + e.getMessage());
+        }
+    }
+
+    private TestRunResult runProcess(Path directory, String... command) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(directory.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append("\n");
+            }
+            int exitCode = process.waitFor();
+            return new TestRunResult(exitCode == 0, output.toString());
+        } catch (Exception e) {
+            return new TestRunResult(false, e.getMessage());
         }
     }
 
@@ -415,7 +579,7 @@ public class SwarmOrchestrator {
                 failSummary);
     }
 
-    private void writeHtmlReport(Path projectPath, String fileName, String title, SwarmStatus status, String content, ExecutionThread thread) {
+    void writeHtmlReport(Path projectPath, String fileName, String title, SwarmStatus status, String content, ExecutionThread thread) {
         try {
             Path reportFile = projectPath.resolve(fileName);
             String statusColor = (status == SwarmStatus.SUCCESS) ? "#10b981" : "#ef4444";
@@ -426,44 +590,85 @@ public class SwarmOrchestrator {
                     .replace("\n", "<br/>");
 
             StringBuilder historyHtml = new StringBuilder();
-            for (AgentInvocationLog log : thread.getHistory()) {
-                historyHtml.append(String.format("<li><strong>%s</strong>: %s</li>", log.type(), log.status()));
+            int historyCount = 0;
+            if (thread != null && thread.getHistory() != null) {
+                historyCount = thread.getHistory().size();
+                for (AgentInvocationLog log : thread.getHistory()) {
+                    historyHtml.append(String.format("<li><strong>%s</strong>: %s</li>", log.type(), log.status()));
+                }
+            }
+            if (historyHtml.isEmpty()) {
+                historyHtml.append("<li>No agent invocations recorded</li>");
             }
 
-            String html = String.format("""
-                    <!DOCTYPE html>
-                    <html lang="en">
-                    <head>
-                        <meta charset="UTF-8">
-                        <title>%s</title>
-                        <style>
-                            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 2rem; }
-                            .container { max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 2rem; }
-                            h1 { margin-top: 0; font-size: 1.75rem; color: #0f172a; }
-                            .badge { display: inline-block; padding: 0.35rem 0.75rem; border-radius: 9999px; font-weight: 600; color: #ffffff; background: %s; margin-bottom: 1.5rem; }
-                            .history { background: #f1f5f9; padding: 1rem 1.5rem; border-radius: 6px; margin-bottom: 1.5rem; }
-                            .history ul { margin: 0.5rem 0 0 0; padding-left: 1.2rem; }
-                            .content { background: #0f172a; color: #e2e8f0; padding: 1.5rem; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9rem; line-height: 1.6; overflow-x: auto; }
-                            footer { margin-top: 2rem; font-size: 0.8rem; color: #64748b; text-align: center; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <h1>%s</h1>
-                            <div class="badge">%s</div>
-                            <div class="history">
-                                <strong>Agent Invocation Steps (%d):</strong>
-                                <ul>%s</ul>
-                            </div>
-                            <div class="content">%s</div>
-                            <footer>Generated by Taika Swarm Orchestrator</footer>
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            String runCardHtml = String.format("""
+                    <div class="run-card">
+                        <div class="run-header">
+                            <span class="timestamp">Execution Time: %s</span>
+                            <span class="badge" style="background: %s;">%s</span>
                         </div>
-                    </body>
-                    </html>
-                    """, title, statusColor, title, status, thread.getHistory().size(), historyHtml, sanitizedContent);
+                        <div class="history">
+                            <strong>Agent Invocation Steps (%d):</strong>
+                            <ul>%s</ul>
+                        </div>
+                        <div class="content">%s</div>
+                    </div>
+                    """, timestamp, statusColor, status, historyCount, historyHtml, sanitizedContent);
+
+            String placeholder = "<!-- RUN_ENTRIES_PLACEHOLDER -->";
+            String html;
+
+            if (Files.exists(reportFile)) {
+                String existingHtml = Files.readString(reportFile);
+                if (existingHtml.contains(placeholder)) {
+                    html = existingHtml.replace(placeholder, runCardHtml + "\n            " + placeholder);
+                } else if (existingHtml.contains("<footer>")) {
+                    html = existingHtml.replace("<footer>", runCardHtml + "\n            " + placeholder + "\n            <footer>");
+                } else if (existingHtml.contains("</div>\n</body>")) {
+                    html = existingHtml.replace("</div>\n</body>", runCardHtml + "\n            " + placeholder + "\n        </div>\n</body>");
+                } else if (existingHtml.contains("</body>")) {
+                    html = existingHtml.replace("</body>", runCardHtml + "\n            " + placeholder + "\n</body>");
+                } else {
+                    html = existingHtml + "\n" + runCardHtml;
+                }
+                logger.info("Appended new execution run (timestamp: {}) to HTML report: {}", timestamp, reportFile);
+            } else {
+                html = String.format("""
+                        <!DOCTYPE html>
+                        <html lang="en">
+                        <head>
+                            <meta charset="UTF-8">
+                            <title>%s</title>
+                            <style>
+                                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 2rem; }
+                                .container { max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 2rem; }
+                                h1 { margin-top: 0; font-size: 1.75rem; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.75rem; }
+                                .run-card { border-bottom: 2px solid #e2e8f0; padding-bottom: 2rem; margin-bottom: 2rem; }
+                                .run-card:last-of-type { border-bottom: none; margin-bottom: 0; }
+                                .run-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+                                .timestamp { font-size: 0.95rem; font-weight: 600; color: #64748b; }
+                                .badge { display: inline-block; padding: 0.35rem 0.75rem; border-radius: 9999px; font-weight: 600; color: #ffffff; }
+                                .history { background: #f1f5f9; padding: 1rem 1.5rem; border-radius: 6px; margin-bottom: 1.5rem; }
+                                .history ul { margin: 0.5rem 0 0 0; padding-left: 1.2rem; }
+                                .content { background: #0f172a; color: #e2e8f0; padding: 1.5rem; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9rem; line-height: 1.6; overflow-x: auto; }
+                                footer { margin-top: 2rem; font-size: 0.8rem; color: #64748b; text-align: center; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <h1>%s</h1>
+                                %s
+                                %s
+                                <footer>Generated by Taika Swarm Orchestrator</footer>
+                            </div>
+                        </body>
+                        </html>
+                        """, title, title, runCardHtml, placeholder);
+                logger.info("Created new HTML report with initial run (timestamp: {}): {}", timestamp, reportFile);
+            }
 
             Files.writeString(reportFile, html);
-            logger.info("Human-readable HTML report written to: {}", reportFile);
         } catch (Exception e) {
             logger.warn("Could not write HTML report to '{}': {}", projectPath, e.getMessage());
         }

@@ -31,7 +31,18 @@ Each target module you want the Taika swarm to modify or operate on must contain
 * `context.md` — Describes the module's technical responsibilities, strict architectural rules, and core components. It sets the immutable "rules of the world" for the AI.
 * `api.md` — Defines the public API or communication contract (e.g., REST endpoints, public services, methods, or DTO interfaces).
 
-### 3. Iterative Evolution via `task.md`
+### 3. Käytännön optimikoko (The Sweet Spot)
+Taikan TDD-silmukka (`gen-robots` ➔ `gen-code` ➔ `audit` / `pipeline`) toimii parhaiten, kun sille annettava kohdepolku (`--path`) on yksittäinen moduuli tai mikropalvelu:
+
+* **Koodimäärä**: n. 500 – 3 000 riviä koodia (LOC).
+* **Tiedostomäärä**: n. 5 – 25 Java-luokkaa tai Vue-komponenttia + testit.
+
+**Miksi tämä on optimi?**
+* **Kontekstin koko**: Konteksti pysyy 10 000 – 40 000 tokenin välillä. Tällöin Gemini 3.5 Flash vastaa sekunneissa eikä Vertex AI:n minuuttikohtainen token-kiintiö (TPM / 429) ylity.
+* **Determinismi ja JaCoCo-laatu**: Kun luokkia on rajallinen määrä, `AUDITOR` ja `UNIT_TESTER` pystyvät pitämään testikattavuuden yli 90 %:ssa ja löytämään jokaisen testaamattoman if-haaran.
+* **Palaute- ja korjaussykli**: Jos testit kaatuvat, agentti korjaa virheet heti ilman, että sen tarvitsee pohtia kymmenien muiden luokkien sivuvaikutuksia.
+
+### 4. Iterative Evolution via `task.md`
 Taika supports a two-tier contract lifecycle:
 1. **Immutable Specification Mode** (`task.md` not present):
    - `README.md`, `context.md`, and `api.md` are treated as immutable contracts. Agents implement and test code strictly against them without modifying the specifications.
@@ -94,6 +105,13 @@ mvn clean install
 
 ## Workflow & Execution Order
 
+### All-in-One Command (`pipeline`)
+To run the entire automated development cycle (`gen-robots` -> `gen-code` -> `audit`) with a single command:
+```bash
+java -jar taika-cli/target/taika-cli-0.4.0.jar pipeline --path /path/to/project --max-loops 3
+```
+If you prefer step-by-step execution, run the commands individually:
+
 When developing or maintaining a project with Taika, execute the commands in the following order from the Taika root directory:
 
 ### Phase 1: Initial Generation (New Project)
@@ -102,13 +120,13 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 
 1. **Generate Acceptance Tests (`gen-robots`)**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-robots --path /path/to/project --max-loops 3
    ```
    *Generates acceptance test suites in `robots/credentials_validation.robot` and validates them with `robot --dryrun`.*
 
 2. **Generate Code and Unit Tests with TDD Loop (`gen-code`)**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-code --path /path/to/project --max-loops 3
    ```
    *Generates unit tests, dummy stubs, and production implementation. Ensures both unit tests and Robot tests pass.*
 
@@ -118,7 +136,7 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 
 3. **Audit Architecture & Test Effectiveness (`audit`)**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path /path/to/project
+   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar audit --path /path/to/project
    ```
    - **If the outcome is `AUDIT STATUS: ACTION_REQUIRED`**: A `task.md` file is generated in the project root outlining required fixes. Proceed to Step 4.
    - **If the outcome is `AUDIT STATUS: PASSED`**: All quality criteria are met and the task is complete!
@@ -126,17 +144,17 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 4. **Remediate Code and Tests per `task.md`**:
    If `task.md` requires changes to acceptance tests, update them first:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-robots --path /path/to/project --max-loops 3
    ```
    Update the code (Taika will automatically detect `Task Mode: ACTIVE`):
    ```bash
-   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path /path/to/project --max-loops 3
+   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-code --path /path/to/project --max-loops 3
    ```
    *Fixes the implementation and synchronizes `README.md`, `context.md`, and `api.md` specifications accordingly.*
 
 5. **Re-run the Audit**:
    ```bash
-   java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path /path/to/project
+   java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar audit --path /path/to/project
    ```
    *Repeat steps 4 and 5 until the audit reports `AUDIT STATUS: PASSED`. Once passed, the obsolete `task.md` is automatically removed.*
 
@@ -144,7 +162,7 @@ Ensure that the target project root contains at least `README.md`, `context.md`,
 
 ## CLI Reference
 
-* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path <path> --max-loops 3`
-* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path <path> --max-loops 3`
-* **`audit`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path <path>`
-* **`execution`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar execution --path <path> --objective "<goal>"`
+* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-robots --path <path> --max-loops 3`
+* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar gen-code --path <path> --max-loops 3`
+* **`audit`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar audit --path <path>`
+* **`pipeline`**: `java -jar taika-cli/target/taika-cli-0.4.0-SNAPSHOT.jar pipeline --path <path> --max-loops 3`

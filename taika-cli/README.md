@@ -8,13 +8,18 @@ This module is the user-facing entry point for the entire Taika system. It provi
 
 *   **`SwarmCommands`**: A `@ShellComponent` that defines all user-callable commands.
 
-## Key Command: `execution`
+## Supported Commands
 
-This is the primary command to start the agent swarm.
+*   **`gen-robots`**: Generates declarative acceptance tests using Robot Framework and verifies syntax with `robot --dryrun`.
+    *   `gen-robots --path <project-path> --max-loops 3`
+*   **`gen-code`**: Runs the 7-step deterministic TDD loop (JUnit/Vitest unit tests -> dummy stubs -> Maven/npm test verification -> production implementation -> final validation).
+    *   `gen-code --path <project-path> --max-loops 3`
+*   **`audit`**: Performs architectural, code quality, and test effectiveness analysis, outputting `taika-report-audit.html` and generating `task.md` when fixes are required.
+    *   `audit --path <project-path>`
+*   **`pipeline`** (aliases: `flow`, `auto`): Executes the entire pipeline in sequence (`gen-robots` -> `gen-code` -> `audit`).
+    *   `pipeline --path <project-path> --max-loops 3`
 
-*   **Usage**: `execution --path <project-path> --objective <your-goal>`
-*   **`--path` (`-p`)**: The absolute or relative path to the target project directory.
-*   **`--objective` (`-o`)**: A high-level, natural language description of the task the swarm needs to accomplish.
+All commands can be invoked non-interactively directly from the command line using the executable JAR.
 
 ## Dependencies
 *   `org.springframework.shell:spring-shell-starter`: Provides the core CLI framework.

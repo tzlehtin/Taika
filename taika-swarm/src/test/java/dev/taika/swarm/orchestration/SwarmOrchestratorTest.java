@@ -3,6 +3,8 @@ package dev.taika.swarm.orchestration;
 import dev.taika.agent.service.AgentService;
 import dev.taika.api.AgentResult;
 import dev.taika.api.AgentType;
+import dev.taika.swarm.orchestration.model.AgentInvocationLog;
+import dev.taika.swarm.orchestration.model.ExecutionThread;
 import dev.taika.swarm.orchestration.model.SwarmResult;
 import dev.taika.swarm.orchestration.model.SwarmStatus;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -98,6 +101,123 @@ class SwarmOrchestratorTest {
         assertEquals(SwarmStatus.SUCCESS, result.status());
         assertFalse(java.nio.file.Files.exists(taskMd), "task.md should be deleted when audit passes cleanly");
         assertTrue(result.finalSummary().contains("CLEAN"));
+    }
+
+    @Test
+    void writeHtmlReport_shouldAppendRunsAndIncludeTimestamps(@TempDir Path tempDir) throws java.io.IOException {
+        // Arrange
+        var thread1 = new ExecutionThread();
+        thread1.log(new AgentInvocationLog(AgentType.UNIT_TESTER, "SUCCESS"));
+        var thread2 = new ExecutionThread();
+        thread2.log(new AgentInvocationLog(AgentType.CODER, "SUCCESS"));
+
+        String reportFileName = "taika-report-gen-code.html";
+
+        // Act: First run
+        swarmOrchestrator.writeHtmlReport(tempDir, reportFileName, "Taika Code Generation Report",
+                SwarmStatus.MAX_ITERATIONS_REACHED, "Run 1: Compilation failure", thread1);
+
+        // Act: Second run (append)
+        swarmOrchestrator.writeHtmlReport(tempDir, reportFileName, "Taika Code Generation Report",
+                SwarmStatus.SUCCESS, "Run 2: All tests passed", thread2);
+
+        // Assert
+        Path reportFile = tempDir.resolve(reportFileName);
+        assertTrue(java.nio.file.Files.exists(reportFile));
+        String html = java.nio.file.Files.readString(reportFile);
+
+        assertTrue(html.contains("Run 1: Compilation failure"));
+        assertTrue(html.contains("Run 2: All tests passed"));
+        assertTrue(html.contains("Execution Time:"));
+        assertTrue(html.contains("UNIT_TESTER"));
+        assertTrue(html.contains("CODER"));
+    }
+
+    @Test
+    void pipeline_shouldExecuteAllStepsSuccessfully() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var robotResult = new SwarmResult("t1", SwarmStatus.SUCCESS, List.of(), "Robots ready");
+        var codeResult = new SwarmResult("t2", SwarmStatus.SUCCESS, List.of(), "Code ready");
+        var auditResult = new SwarmResult("t3", SwarmStatus.SUCCESS, List.of(), "Audit passed");
+
+        org.mockito.Mockito.doReturn(robotResult).when(spiedOrchestrator).generateRobotTests(eq(fakePath), eq(3));
+        org.mockito.Mockito.doReturn(codeResult).when(spiedOrchestrator).generateCode(eq(fakePath), eq(3), any());
+        org.mockito.Mockito.doReturn(auditResult).when(spiedOrchestrator).audit(eq(fakePath));
+
+        // Act
+        SwarmResult result = spiedOrchestrator.pipeline(fakePath, 3, null);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+        assertTrue(result.finalSummary().contains("Pipeline Execution Complete"));
+    }
+
+    @Test
+    void pipeline_shouldHaltWhenRobotGenerationFails() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var robotFailure = new SwarmResult("t1", SwarmStatus.MAX_ITERATIONS_REACHED, List.of(), "Robot dryrun failed");
+        org.mockito.Mockito.doReturn(robotFailure).when(spiedOrchestrator).generateRobotTests(eq(fakePath), eq(3));
+
+        // Act
+        SwarmResult result = spiedOrchestrator.pipeline(fakePath, 3, null);
+
+        // Assert
+        assertEquals(SwarmStatus.MAX_ITERATIONS_REACHED, result.status());
+        assertTrue(result.finalSummary().contains("Pipeline halted at Step 1 (gen-robots)"));
+    }
+
+    @Test
+    void pipeline_shouldHaltWhenCodeGenerationFails() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var robotResult = new SwarmResult("t1", SwarmStatus.SUCCESS, List.of(), "Robots ready");
+        var codeFailure = new SwarmResult("t2", SwarmStatus.MAX_ITERATIONS_REACHED, List.of(), "Compilation failed");
+
+        org.mockito.Mockito.doReturn(robotResult).when(spiedOrchestrator).generateRobotTests(eq(fakePath), eq(3));
+        org.mockito.Mockito.doReturn(codeFailure).when(spiedOrchestrator).generateCode(eq(fakePath), eq(3), any());
+
+        // Act
+        SwarmResult result = spiedOrchestrator.pipeline(fakePath, 3, null);
+
+        // Assert
+        assertEquals(SwarmStatus.MAX_ITERATIONS_REACHED, result.status());
+        assertTrue(result.finalSummary().contains("Pipeline halted at Step 2 (gen-code)"));
+    }
+
+    @Test
+    void pipeline_shouldHandleAuditFailureGracefully() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var robotResult = new SwarmResult("t1", SwarmStatus.SUCCESS, List.of(), "Robots ready");
+        var codeResult = new SwarmResult("t2", SwarmStatus.SUCCESS, List.of(), "Code ready");
+        var auditFailure = new SwarmResult("t3", SwarmStatus.MAX_ITERATIONS_REACHED, List.of(), "Audit diagnostics failed");
+
+        org.mockito.Mockito.doReturn(robotResult).when(spiedOrchestrator).generateRobotTests(eq(fakePath), eq(3));
+        org.mockito.Mockito.doReturn(codeResult).when(spiedOrchestrator).generateCode(eq(fakePath), eq(3), any());
+        org.mockito.Mockito.doReturn(auditFailure).when(spiedOrchestrator).audit(eq(fakePath));
+
+        // Act
+        SwarmResult result = spiedOrchestrator.pipeline(fakePath, 3, null);
+
+        // Assert
+        assertEquals(SwarmStatus.MAX_ITERATIONS_REACHED, result.status());
+        assertTrue(result.finalSummary().contains("Audit diagnostics failed"));
+    }
+
+    @Test
+    void pipeline_shouldInvokeOverloadedMethodsCorrectly() {
+        // Arrange
+        SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
+        var successResult = new SwarmResult("t1", SwarmStatus.SUCCESS, List.of(), "Pipeline success");
+        org.mockito.Mockito.doReturn(successResult).when(spiedOrchestrator).pipeline(eq(fakePath), anyInt(), any());
+
+        // Act & Assert
+        SwarmResult res1 = spiedOrchestrator.pipeline(fakePath);
+        SwarmResult res2 = spiedOrchestrator.pipeline(fakePath, 5);
+        assertEquals(SwarmStatus.SUCCESS, res1.status());
+        assertEquals(SwarmStatus.SUCCESS, res2.status());
     }
 
     @Test

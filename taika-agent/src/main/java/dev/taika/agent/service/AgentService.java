@@ -13,7 +13,9 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
+import org.springframework.beans.factory.annotation.Value;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -31,17 +33,20 @@ public class AgentService {
     private final FileSystemWriter fileSystemWriter;
     private final MavenExecutor mavenExecutor;
     private final FileReader fileReader;
+    private final String modelName;
 
     public AgentService(ChatClient.Builder chatClientBuilder,
                         FileSystemReader fileSystemReader,
                         FileSystemWriter fileSystemWriter,
                         MavenExecutor mavenExecutor,
-                        FileReader fileReader) {
+                        FileReader fileReader,
+                        @Value("${spring.ai.google.genai.chat.options.model:gemini-3.5-flash}") String modelName) {
         this.chatClientBuilder = chatClientBuilder;
         this.fileSystemReader = fileSystemReader;
         this.fileSystemWriter = fileSystemWriter;
         this.mavenExecutor = mavenExecutor;
         this.fileReader = fileReader;
+        this.modelName = modelName;
     }
 
     public AgentResult executeTask(Path projectPath, AgentType agentType, String taskDescription) {
@@ -49,7 +54,6 @@ public class AgentService {
 
         // 1. Context Assembly: Load all relevant project files.
         String context;
-        // Correctly handle the Map returned by readAll
         try {
             String[] globPatterns = getGlobPatternsForAgent(agentType);
 
@@ -60,18 +64,22 @@ public class AgentService {
                     .filter(entry -> !entry.getKey().contains("/target/") && !entry.getKey().contains("\\target\\")
                             && !entry.getKey().contains("/.git/") && !entry.getKey().contains("\\.git\\")
                             && !entry.getKey().contains("/node_modules/") && !entry.getKey().contains("\\node_modules\\")
-                            && !entry.getKey().endsWith(".class") && !entry.getKey().endsWith(".jar"))
+                            && !entry.getKey().endsWith(".class") && !entry.getKey().endsWith(".jar")
+                            && !entry.getKey().endsWith(".wasm") && !entry.getKey().endsWith(".png")
+                            && !entry.getKey().endsWith(".jpg") && !entry.getKey().endsWith(".lock"))
                     .map(entry -> "--- " + entry.getKey() + " ---\n" + entry.getValue())
                     .collect(Collectors.joining("\n\n"));
-        } catch (Exception e) { // Catching a broader exception class for simplicity
+        } catch (Exception e) {
             logger.error("Failed to read project context from path: {}", projectPath, e);
             return new AgentResult(UUID.randomUUID().toString(), "FAILURE", "Failed to read project context.", null, e.getMessage());
         }
 
         // 2. Role Isolation & Prompt Assembly
-        var systemMessage = new SystemMessage(resolveSystemPrompt(agentType));
+        String currentTimestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        var systemMessage = new SystemMessage(resolveSystemPrompt(agentType, currentTimestamp));
 
         var userMessage = new UserMessage(
+                "Current System Timestamp: " + currentTimestamp + "\n\n" +
                 "Task: " + taskDescription + "\n\n" +
                 "Project Context:\n" + context
         );
@@ -79,22 +87,41 @@ public class AgentService {
         // Dynamically create the ToolRegistry for this specific task, passing the projectPath.
         var toolRegistry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, projectPath);
 
-        // 3. Execution Loop (simplified to a single call for this implementation)
+        // 3. Execution Loop with explicit exponential backoff for HTTP 429 / Resource Exhausted
         logger.info("Calling AI model with assembled prompt and tools...");
-        ChatResponse response = chatClientBuilder.build()
-                .prompt()
-                .messages(systemMessage, userMessage)
-                .toolCallbacks(toolRegistry.getToolCallbacks())
-                .call()
-                .chatResponse(); // Get the final response object as shown in the working example.
+        ChatResponse response = null;
+        int maxRetries = 5;
+        long backoffMs = 10000;
 
-        // Use the correct .getText() method as proven by the provided example.
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                response = chatClientBuilder.build()
+                        .prompt()
+                        .messages(systemMessage, userMessage)
+                        .toolCallbacks(toolRegistry.getToolCallbacks())
+                        .call()
+                        .chatResponse();
+                break;
+            } catch (Exception e) {
+                boolean isRateLimit = isRateLimitException(e);
+                if (isRateLimit && attempt < maxRetries) {
+                    logger.warn("Rate limit (HTTP 429 / Resource exhausted) encountered. Waiting {} ms before retry {}/{}...", backoffMs, attempt + 1, maxRetries);
+                    try {
+                        Thread.sleep(backoffMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted during rate limit backoff", ie);
+                    }
+                    backoffMs *= 2;
+                } else {
+                    throw e;
+                }
+            }
+        }
+
         String responseContent = response.getResult().getOutput().getText();
         logger.info("AI execution finished. Response: {}", responseContent);
 
-
-        // For now, we return the direct AI response. A real implementation would parse this
-        // and extract structured data like modified files.
         return new AgentResult(
                 UUID.randomUUID().toString(),
                 "SUCCESS",
@@ -102,6 +129,21 @@ public class AgentService {
                 toolRegistry.getWrittenFiles(),
                 responseContent
         );
+    }
+
+    private boolean isRateLimitException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String msg = current.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("429") || lower.contains("resource exhausted") || lower.contains("quota") || lower.contains("rate limit")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private String[] getGlobPatternsForAgent(AgentType agentType) {
@@ -113,19 +155,43 @@ public class AgentService {
         };
     }
 
-    private String resolveSystemPrompt(AgentType agentType) {
+    private String resolveSystemPrompt(AgentType agentType, String currentTimestamp) {
         if (agentType == AgentType.AUDITOR) {
             return """
-                You are a Principal Software Architect and Quality Assurance Auditor.
+                You are Taika %s Quality Assurance Auditor.
                 Your mission is to perform a strict, uncompromising audit of the target project.
+                Current System Timestamp: %s.
+                When formatting the audit report, you MUST strictly use the current date/timestamp (%s) and identify your role as:
+                Auditor: Taika %s Quality Assurance Auditor
 
-                AUDIT SCOPE:
+                DETERMINISTIC DIAGNOSTICS MANDATE:
+                - Inspect the provided build and coverage metrics in the task description.
+                - If Branch Coverage is below 85%% or any branches/lines are missed, you MUST identify what boundary conditions or edge cases are untested (e.g. whitespace in strings, consecutive dots, null handling) and demand tests for them in `task.md`.
+
+                AUDIT SCOPE & SYSTEM-SPECIFIC CHECKLIST:
                 1. Adherence to Specifications: Compare existing code against `README.md`, `context.md`, and `api.md`.
-                2. Architecture & Design: Identify missing annotations (e.g. Spring `@Service`), lack of structured error models (e.g. field-specific error DTOs instead of raw strings), thread safety, and maintainability.
-                3. Test Effectiveness vs Fake Tests: Inspect test suites (both JUnit/Vitest and Robot Framework).
-                   - Flag tautological or fake assertions (e.g. Robot tests that only assert their own parameters without calling production logic or APIs).
-                   - Verify edge case coverage, boundary conditions, and true functional verification.
-                4. Code Quality & Security: Inspect input validation robustness (e.g. email/password rules) and potential edge-case leaks.
+                2. JAVA / SPRING SPECIFIC CHECKS (if pom.xml exists):
+                   - Immutability: Do DTO/Result classes expose mutable internal lists (`return errors;`)? Must use `List.copyOf()` or records.
+                   - Spring Context: Are service classes properly annotated with `@Component` or `@Service`? Avoid raw `new Service()` in enterprise contexts.
+                   - Input Hygiene: Check string validation for edge cases: whitespace handling (`contains(" ")`), consecutive dots (`..`), nulls, and boundary conditions.
+                3. VUE 3 / TYPESCRIPT SPECIFIC CHECKS (if package.json exists):
+                   - Component Architecture: Strict Composition API (`<script setup lang="ts">`). Props must be typed and use `withDefaults`.
+                   - Prop Mutation Anti-Pattern: Verify props are NEVER mutated directly by the child component. State updates must be emitted via strongly typed `defineEmits`.
+                   - Input Hygiene: Are inputs properly trimmed? Are validation errors reactive and clear? Are interactive elements instrumented with `data-test="..."` attributes?
+                   - Reactivity & Memory Leaks: Verify watchers/timers are properly cleaned up on unmount if used.
+                4. TEST EFFECTIVENESS VS FAKE TESTS (Both JUnit/Vitest and Robot):
+                   - Real vs Mocked DOM in Vitest: Verify Vitest tests actually mount the component (`mount(...)`), set input values via `data-test` selectors, trigger events, await DOM updates (`flushPromises()` / `nextTick()`), and verify emitted payloads.
+                   - Fake Test Detection: Flag tautological or fake assertions immediately:
+                     * Tests that only assert hardcoded parameters (e.g. `Should Be True '${expected}' in ...'` or `expect('VALID').toBe('VALID')`).
+                     * Tests that pass even if production logic is commented out.
+                   - Robot Acceptance Testing:
+                     * In Java: Must execute a real binary or CLI runner (via Process library) or live HTTP server.
+                     * In Vue: Must verify genuine contract execution or real component rendering, never standalone parameter loops.
+
+                FILE READING RESTRICTION:
+                - NEVER invoke fileSystemReader on the entire project root or 'node_modules/' or 'target/'.
+                - Inspect only specific source files (e.g. src/, tests/, robots/, package.json, pom.xml) using fileReader.
+                - Avoid generating complex JSDOM CLI wrapper scripts in tests/ if simple node-based execution or declarative component checks are sufficient.
 
                 OUTPUT REQUIREMENTS:
                 - In your text response, provide an in-depth, structured Audit Report covering: Executive Summary, Component Architecture, Test Effectiveness, and Required Fixes.
@@ -150,12 +216,14 @@ public class AgentService {
                   [Concrete changes required in production classes]
                   ## Test Verification Requirements
                   [Real test assertions that must be written and verified]
-                """;
+                """.formatted(modelName, currentTimestamp, currentTimestamp, modelName);
         }
 
         if (agentType == AgentType.ROBOT_TESTER) {
             return """
-                You are a specialized Robot Framework QA Engineer.
+                You are Taika %s Robot Framework QA Engineer.
+                Current System Timestamp: %s.
+                In any reports or generated suite headers, identify yourself as 'Taika %s Robot Tester'.
                 Your sole responsibility is to generate clean, standard Robot Framework test suites (*.robot) that pass `robot --dryrun` without any errors on the very first try.
                 
                 CRITICAL SYNTAX & LIBRARY RULES:
@@ -195,12 +263,14 @@ public class AgentService {
 
                 Missing Number In Password Fails
                     Validate Credentials    user@lumo.ws    NoNumberPass  INVALID
-                """;
+                """.formatted(modelName, currentTimestamp, modelName);
         }
 
         if (agentType == AgentType.UNIT_TESTER) {
             return """
-                You are a specialized Unit Testing & Test-Driven Development (TDD) Engineer.
+                You are Taika %s Unit Testing & TDD Engineer.
+                Current System Timestamp: %s.
+                In test reports, identify yourself as 'Taika %s Unit Tester'.
                 Your responsibility is to write clean, standard unit tests based on the specification, and minimal dummy implementations with explicit TODO comments.
                 
                 STRICT RULES:
@@ -222,12 +292,14 @@ public class AgentService {
                    - You MUST use the `fileSystemWriter` tool for EVERY file you create or modify (e.g. pom.xml, classes, test classes).
                    - NEVER output Java source code or markdown code blocks in your final text response. You MUST invoke `fileSystemWriter` first.
                    - In your final text response, provide ONLY a brief summary of the test cases and files created.
-                """;
+                """.formatted(modelName, currentTimestamp, modelName);
         }
 
         if (agentType == AgentType.CODER) {
             return """
-                You are a world-class software engineer responsible for implementing production code.
+                You are Taika %s Production Software Engineer.
+                Current System Timestamp: %s.
+                In your response, identify yourself as 'Taika %s Coder'.
                 
                 STRICT RULES:
                 1. Inspect existing source code for all `TODO:` comments and dummy implementations created by the test phase.
@@ -244,17 +316,19 @@ public class AgentService {
                    - NEVER output file contents directly in your text response.
                    - When task.md is present in the context, update README.md, api.md, and context.md to reflect the new state.
                    - In your final text response, summarize which components you implemented and which TODOs were resolved.
-                """;
+                """.formatted(modelName, currentTimestamp, modelName);
         }
 
         if (agentType == AgentType.VALIDATOR) {
             return """
-                You are a Quality Gate and Verification Engineer.
+                You are Taika %s Quality Gate and Verification Engineer.
+                Current System Timestamp: %s.
+                In your report, identify yourself as 'Taika %s Validator'.
                 Your task is to review the code and tests against context.md, api.md, and README.md.
                 CRITICAL RULE: If task.md is NOT present, NEVER modify README.md, context.md, or api.md!
                 If task.md IS present, verify that README.md, context.md, and api.md have been updated to match task.md.
                 In your final text response, provide a concise summary of the verification status, satisfied requirements, and test results.
-                """;
+                """.formatted(modelName, currentTimestamp, modelName);
         }
 
         return """
