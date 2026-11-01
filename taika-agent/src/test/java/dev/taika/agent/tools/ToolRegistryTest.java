@@ -9,17 +9,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.function.FunctionToolCallback;
 
 import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.junit.jupiter.api.DynamicTest.stream;
 
 @ExtendWith(MockitoExtension.class)
 class ToolRegistryTest {
@@ -55,8 +50,14 @@ class ToolRegistryTest {
 
     @Test
     void shouldRegisterToolsWithCorrectNames() {
-        // This test is redundant with shouldInitializeAndRegisterAllToolCallbacks.
-        // The important part is that the correct number of tools are registered.
-        assertEquals(4, toolRegistry.getToolCallbacks().size(), "Should register all 4 tools.");
+        Set<String> toolNames = toolRegistry.getToolCallbacks().stream()
+                .map(cb -> cb.getToolDefinition().name())
+                .collect(Collectors.toSet());
+
+        assertEquals(4, toolNames.size(), "Should register exactly 4 tools.");
+        assertTrue(toolNames.contains("fileSystemReader"));
+        assertTrue(toolNames.contains("fileSystemWriter"));
+        assertTrue(toolNames.contains("mavenExecutor"));
+        assertTrue(toolNames.contains("fileReader"));
     }
 }

@@ -143,4 +143,40 @@ public class SwarmCommands {
             return "An unexpected error occurred during Robot test generation: " + e.getMessage();
         }
     }
+
+    @ShellMethod(key = {"pipeline", "flow", "auto"}, value = "Executes the full automated workflow: gen-robots -> gen-code -> audit in sequence.")
+    public String pipeline(
+            @ShellOption(value = {"--path", "-p"}, arity = 1, help = "The absolute or relative path to the root directory of the project.") String path,
+            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "8", help = "Maximum iterations per phase.") int maxLoops,
+            @ShellOption(value = {"--objective", "-o"}, defaultValue = ShellOption.NULL, help = "Optional custom objective or feature request.") String objective
+    ) {
+        System.out.println("Starting Automated Taika Pipeline (gen-robots -> gen-code -> audit):");
+        System.out.println("Project Path: " + path);
+        System.out.println("Max Loops: " + maxLoops);
+        if (objective != null && !objective.isBlank()) {
+            System.out.println("Objective: " + objective);
+        }
+        Path taskPath = Path.of(path).toAbsolutePath().normalize().resolve("task.md");
+        if (Files.exists(taskPath)) {
+            System.out.println("Task Mode: ACTIVE (found task.md - specifications will be synchronized)");
+        }
+        System.out.println("-------------------------------------------------");
+
+        try {
+            Path projectPath = Path.of(path).toAbsolutePath().normalize();
+
+            if (!Files.exists(projectPath)) {
+                return "Error: The specified path does not exist: " + projectPath;
+            }
+            if (!Files.isDirectory(projectPath)) {
+                return "Error: The specified path is not a directory: " + projectPath;
+            }
+
+            SwarmResult result = swarmOrchestrator.pipeline(projectPath, maxLoops, objective);
+            return String.format("\nPipeline Complete!\nStatus: %s\nSummary:\n%s",
+                    result.status(), result.finalSummary());
+        } catch (Exception e) {
+            return "An unexpected error occurred during pipeline execution: " + e.getMessage();
+        }
+    }
 }

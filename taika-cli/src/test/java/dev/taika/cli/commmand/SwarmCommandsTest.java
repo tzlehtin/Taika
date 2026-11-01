@@ -148,4 +148,40 @@ class SwarmCommandsTest {
         assertTrue(output.contains("Status: SUCCESS"));
         assertTrue(output.contains("Summary:"));
     }
+
+    @Test
+    void pipeline_shouldSucceedWhenOrchestratorSucceeds(@TempDir Path tempDir) {
+        // Arrange
+        var successResult = new SwarmResult(UUID.randomUUID().toString(), SwarmStatus.SUCCESS, Collections.emptyList(), "Pipeline complete.");
+        when(swarmOrchestrator.pipeline(eq(tempDir), eq(3), eq("Custom objective"))).thenReturn(successResult);
+
+        // Act
+        String output = swarmCommands.pipeline(tempDir.toString(), 3, "Custom objective");
+
+        // Assert
+        assertTrue(output.contains("Pipeline Complete!"));
+        assertTrue(output.contains("Status: SUCCESS"));
+        assertTrue(output.contains("Summary:"));
+    }
+
+    @Test
+    void pipeline_shouldHandleExceptionGracefully(@TempDir Path tempDir) {
+        // Arrange
+        when(swarmOrchestrator.pipeline(any(Path.class), eq(5), any())).thenThrow(new RuntimeException("Pipeline crash"));
+
+        // Act
+        String output = swarmCommands.pipeline(tempDir.toString(), 5, null);
+
+        // Assert
+        assertTrue(output.contains("An unexpected error occurred during pipeline execution: Pipeline crash"));
+    }
+
+    @Test
+    void pipeline_shouldReturnErrorForInvalidPath() {
+        // Act
+        String output = swarmCommands.pipeline("/nonexistent/directory/path", 3, null);
+
+        // Assert
+        assertTrue(output.contains("Error: The specified path does not exist"));
+    }
 }
