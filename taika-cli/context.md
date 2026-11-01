@@ -11,7 +11,7 @@ This module serves as the primary user interface and entry point for the Taika s
 ## Architectural Blueprint
 The CLI acts as the deterministic front door to the dynamic agent architecture.
 
-1.  **Command Parsing**: The user executes a command (e.g., `taika execution --path . --objective "Implement feature X"`). The CLI parses the flags and arguments using a standard CLI library.
+1.  **Command Parsing**: The user executes a command (e.g., `taika execution --path . --objective "Implement feature X"` or `taika gen-robots --path .`). The CLI parses the flags and arguments using a standard CLI library.
 2.  **Validation**: It verifies that the target project path exists and is a valid directory, and that the main objective is not empty.
 3.  **Swarm Invocation**: The CLI bootstraps the context and calls the `SwarmOrchestrator` from `taika-swarm`. It blocks execution (or streams updates if applicable in later phases) while the swarm executes its hybrid agent loops.
 4.  **Result Formatting**: Once the swarm completes its execution chain, the CLI receives the `SwarmResult`. It parses the invocation logs and outputs a clean, human-readable report to the terminal (standard output), indicating whether the objective was met and detailing which steps were taken.
@@ -33,3 +33,22 @@ The application relies on Google Cloud Application Default Credentials (ADC) to 
 * **Required Command**:
   ```bash
   gcloud auth application-default login
+
+## Build and Packaging Rules
+1. The project must be packaged into an executable JAR.
+2. The `pom.xml` configuration must explicitly define the `Main-Class` manifest attribute using the `maven-jar-plugin` or `spring-boot-maven-plugin` (depending on the framework).
+3. If the agent modifies the `pom.xml` or creates a new module, it MUST ensure the following plugin configuration is present to avoid the "no main manifest attribute" runtime error:
+
+```xml
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-jar-plugin</artifactId>
+    <version>3.3.0</version>
+    <configuration>
+        <archive>
+            <manifest>
+                <addClasspath>true</addClasspath>
+                <mainClass>dev.taika.cli.TaikaCliApplication</mainClass> </manifest>
+        </archive>
+    </configuration>
+</plugin>

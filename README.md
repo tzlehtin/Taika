@@ -73,10 +73,14 @@ mvn clean install -U
 
 3.  **Run the Application**: Execute the CLI application from the project root directory:
     ```bash
-    java -jar taika-cli/target/taika-cli-0.0.1-SNAPSHOT.jar
+    java -jar taika-cli/target/taika-cli-0.3.0-SNAPSHOT.jar
     ```
 
 4.  **Execute a Task**: Once the Spring Shell prompt (`shell:>` aukeaa) appears, you can trigger the agent swarm with the `execution` command:
     ```bash
     execution --path /path/to/your/target/project --objective "Implement a new REST endpoint that returns a list of users."
+    ```
+    To generate Robot Framework acceptance tests without triggering production code:
+    ```bash
+    gen-robots --path /path/to/your/target/project
     ```

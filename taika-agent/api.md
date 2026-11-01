@@ -15,4 +15,4 @@ Orchestrates a highly specialized AI role to solve a bounded task within a targe
 ## External Riippuvuussopimukset (Cross-Module Contracts)
 
 This module depends on the domain structures defined in `dev.taika:taika-api`. For role definitions and behaviors, see `../taika-api/api.md`:
-* `AgentType` (`INTERFACE_DESIGNER`, `CODER`, `TESTER`, `VALIDATOR`): Used to dynamically route and load the correct sääntökirja (System Instruction) for the execution loop.
+* `AgentType` (`INTERFACE_DESIGNER`, `ROBOT_TESTER`, `UNIT_TESTER`, `CODER`, `TESTER`, `VALIDATOR`): Used to dynamically route and load the correct sääntökirja (System Instruction) for the execution loop.
