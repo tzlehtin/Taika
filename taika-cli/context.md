@@ -6,7 +6,7 @@ This module serves as the primary user interface and entry point for the Taika s
 ## Dependencies
 * `dev.taika:taika-swarm`: Used to invoke the `SwarmOrchestrator` and trigger multi-agent threads based on user commands.
 * `dev.taika:taika-api`: Provides shared core models and data types for processing configuration or common status enums.
-* `org.springframework.ai:spring-ai-vertex-ai-gemini-spring-boot-starter`: Required directly at this executable layer to bootstrap the Vertex AI Gemini client and Embedding models.
+* `org.springframework.ai:spring-ai-starter-model-google-genai`: Required directly at this executable layer to bootstrap Google GenAI Gemini client and models.
 
 ## Architectural Blueprint
 The CLI acts as the deterministic front door to the dynamic agent architecture.
@@ -21,11 +21,12 @@ Being the executable module, `taika-cli` is responsible for providing the runtim
 
 ### 1. Application Properties (`src/main/resources/application.properties`)
 The following Spring AI configuration keys must be defined at this layer to enable communication with the LLM provider:
-* `spring.ai.vertex.ai.gemini.project-id`: The target Google Cloud Project ID (e.g., `lumo-ws`).
-* `spring.ai.vertex.ai.gemini.location`: The GCP infrastructure location (e.g., `europe-west1`).
-* `spring.ai.vertex.ai.gemini.chat.options.model`: The target Gemini LLM version (e.g., `gemini-2.5-flash`).
-* `spring.ai.vertex.ai.gemini.chat.options.temperature`: LLM sampling temperature.
-* `spring.ai.vertex.ai.embedding.text.options.model`: The embedding model for semantic processing.
+* `spring.ai.model.chat`: Set to `google-genai`.
+* `spring.ai.google.genai.project-id`: The target Google Cloud Project ID (e.g., `lumo-ws`).
+* `spring.ai.google.genai.location`: The GCP infrastructure location (e.g., `europe-west3`).
+* `spring.ai.google.genai.chat.options.model`: The target Gemini LLM version (e.g., `gemini-3.5-flash`).
+* `spring.ai.google.genai.chat.options.temperature`: LLM sampling temperature.
+* `spring.ai.google.genai.chat.include-thoughts`: Enables reasoning transparency.
 
 ### 2. Authentication Context (Google Cloud Vertex AI)
 The application relies on Google Cloud Application Default Credentials (ADC) to authenticate against Vertex AI API. 
