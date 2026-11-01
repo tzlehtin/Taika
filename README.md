@@ -82,18 +82,69 @@ mvn clean install
     gcloud auth application-default login
     ```
 
-2.  **Configure Project ID**: Open the `taika-cli/src/main/resources/application.properties` file and replace `your-gcp-project-id` with your actual Google Cloud Project ID.
-
-3.  **Run the Application**: Execute the CLI application from the project root directory:
-    ```bash
-    java -jar taika-cli/target/taika-cli-0.3.0-SNAPSHOT.jar
+2.  **Configure Project ID**: In `taika-cli/src/main/resources/application.properties`, configure your GCP project ID and region:
+    ```properties
+    spring.ai.model.chat=google-genai
+    spring.ai.google.genai.project-id=your-gcp-project-id
+    spring.ai.google.genai.location=europe-west3
+    spring.ai.google.genai.chat.options.model=gemini-3.5-flash
     ```
 
-4.  **Execute a Task**: Once the Spring Shell prompt (`shell:>` aukeaa) appears, you can trigger the agent swarm with the `execution` command:
-    ```bash
-    execution --path /path/to/your/target/project --objective "Implement a new REST endpoint that returns a list of users."
-    ```
-    To generate Robot Framework acceptance tests without triggering production code:
-    ```bash
-    gen-robots --path /path/to/your/target/project
-    ```
+---
+
+## Työnkulku ja ajojärjestys (Workflow & Execution Order)
+
+Kun kehität tai ylläpidät projektia Taikalla, suorita komennot seuraavassa järjestyksessä projektin juuresta käsin:
+
+### Vaihe 1: Alkuperäinen generointi (Uusi projekti)
+
+Varmista ensin, että kohdeprojektissa on vähintään `README.md`, `context.md` ja `api.md`.
+
+1. **Luo hyväksymistestit (`gen-robots`)**:
+   ```bash
+   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path /path/to/project --max-loops 3
+   ```
+   *Luo hyväksymistestit kansioon `robots/credentials_validation.robot` ja varmistaa ne `robot --dryrun` -tarkistuksella.*
+
+2. **Luo koodi ja yksikkötestit TDD-silmukalla (`gen-code`)**:
+   ```bash
+   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path /path/to/project --max-loops 3
+   ```
+   *Generoi yksikkötestit, dummy-koodit ja tuotantototeutuksen. Varmistaa, että sekä yksikkötestit että Robot-testit menevät läpi.*
+
+---
+
+### Vaihe 2: Laadunvarmistus ja `task.md`-jatkokehityssilmukka
+
+3. **Auditoi arkkitehtuuri ja testien kattavuus (`audit`)**:
+   ```bash
+   java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path /path/to/project
+   ```
+   - **Jos tulos on `AUDIT STATUS: ACTION_REQUIRED`**: Projektin juureen syntyy `task.md`. Siirry vaiheeseen 4.
+   - **Jos tulos on `AUDIT STATUS: PASSED`**: Kaikki laatuvaatimukset täyttyvät ja työ on valmis!
+
+4. **Korjaa koodi ja testit `task.md`:n mukaisesti**:
+   Jos `task.md` vaatii muutoksia hyväksymistesteihin, aja ensin:
+   ```bash
+   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path /path/to/project --max-loops 3
+   ```
+   Päivitä koodi (Taika tunnistaa `Task Mode: ACTIVE`):
+   ```bash
+   java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path /path/to/project --max-loops 3
+   ```
+   *Korjaa toteutuksen ja synkronoi samalla `README.md`-, `context.md`- ja `api.md`-määrittelyt.*
+
+5. **Aja auditointi uudelleen**:
+   ```bash
+   java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path /path/to/project
+   ```
+   *Toista vaiheita 4 ja 5, kunnes audit ilmoittaa `AUDIT STATUS: PASSED`. Tällöin vanhentunut `task.md` poistetaan automaattisesti.*
+
+---
+
+## Komentoluettelo (CLI Reference)
+
+* **`gen-robots`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-robots --path <polku> --max-loops 3`
+* **`gen-code`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar gen-code --path <polku> --max-loops 3`
+* **`audit`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar audit --path <polku>`
+* **`execution`**: `java -jar taika-cli/target/taika-cli-0.3.0.jar execution --path <polku> --objective "<tavoite>"`
