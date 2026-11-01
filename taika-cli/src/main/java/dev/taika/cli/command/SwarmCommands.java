@@ -30,6 +30,10 @@ public class SwarmCommands {
         if (objective != null && !objective.isBlank()) {
             System.out.println("Objective: " + objective);
         }
+        Path taskPath = Path.of(path).toAbsolutePath().normalize().resolve("task.md");
+        if (Files.exists(taskPath)) {
+            System.out.println("Task Mode: ACTIVE (found task.md - specifications will be synchronized)");
+        }
         System.out.println("-------------------------------------------------");
 
         try {
@@ -79,6 +83,36 @@ public class SwarmCommands {
                     result.status(), result.finalSummary(), result.invocationHistory().size());
         } catch (Exception e) {
             return "An unexpected error occurred during orchestration: " + e.getMessage();
+        }
+    }
+
+    @ShellMethod(key = "audit", value = "Performs deep architectural, code quality, and test effectiveness audit, generating taika-report-audit.html and task.md.")
+    public String audit(
+            @ShellOption(value = {"--path", "-p"}, arity = 1, help = "The absolute or relative path to the root directory of the project.") String path,
+            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = ShellOption.NULL, help = "Optional max loops (ignored in audit).") String maxLoops
+    ) {
+        System.out.println("Starting Taika Project Audit:");
+        System.out.println("Project Path: " + path);
+        System.out.println("-------------------------------------------------");
+
+        try {
+            Path projectPath = Path.of(path).toAbsolutePath().normalize();
+
+            if (!Files.exists(projectPath)) {
+                return "Error: The specified path does not exist: " + projectPath;
+            }
+            if (!Files.isDirectory(projectPath)) {
+                return "Error: The specified path is not a directory: " + projectPath;
+            }
+
+            SwarmResult result = swarmOrchestrator.audit(projectPath);
+            return String.format("\nAudit Complete!\nStatus: %s\nReport File: %s\nTask File: %s\nSummary:\n%s",
+                    result.status(),
+                    projectPath.resolve("taika-report-audit.html"),
+                    projectPath.resolve("task.md"),
+                    result.finalSummary());
+        } catch (Exception e) {
+            return "An unexpected error occurred during audit: " + e.getMessage();
         }
     }
 

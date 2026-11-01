@@ -46,6 +46,59 @@ public class SwarmOrchestrator {
         return generateCode(projectPath, DEFAULT_MAX_CODE_LOOPS, null);
     }
 
+    /**
+     * Performs a comprehensive quality, architecture, and test effectiveness audit of the project,
+     * generating `taika-report-audit.html` and `task.md`.
+     */
+    public SwarmResult audit(Path projectPath) {
+        logger.info("Starting audit for project '{}'", projectPath);
+        var thread = new ExecutionThread();
+
+        String auditTask = """
+                Perform a complete and thorough audit of this project.
+                1. Verify architectural integrity against context.md, api.md, and README.md.
+                2. Inspect test suites for TRUE effectiveness vs fake assertions (e.g. Robot tests that assert their own parameters rather than verifying real components).
+                3. Identify all concrete code, design, and specification defects.
+                4. Stopping criteria:
+                   - If code and tests meet quality standards without real defects or fake tests, conclude with 'AUDIT STATUS: PASSED' and DO NOT create `task.md`.
+                   - If concrete fixes are required, conclude with 'AUDIT STATUS: ACTION_REQUIRED' and use `fileSystemWriter` to create `task.md` in the project root.
+                """;
+
+        try {
+            AgentResult auditResult = agentService.executeTask(projectPath, AgentType.AUDITOR, auditTask);
+            thread.log(new AgentInvocationLog(AgentType.AUDITOR, auditResult.status()));
+
+            Path taskMdFile = projectPath.resolve("task.md");
+            boolean auditPassed = auditResult.executionLog() != null && auditResult.executionLog().contains("AUDIT STATUS: PASSED");
+
+            if (auditPassed && Files.exists(taskMdFile)) {
+                try {
+                    Files.deleteIfExists(taskMdFile);
+                    logger.info("Audit passed cleanly. Deleted obsolete task.md from project root.");
+                } catch (Exception e) {
+                    logger.warn("Could not delete resolved task.md: {}", e.getMessage());
+                }
+            }
+
+            String taskMdNotice;
+            if (Files.exists(taskMdFile)) {
+                taskMdNotice = "\nAction Required: `task.md` generated at: " + taskMdFile;
+            } else {
+                taskMdNotice = "\nAudit Result: CLEAN (No `task.md` required. Code and tests meet quality standards).";
+            }
+
+            String summary = "Project Audit Complete!\n" + taskMdNotice + "\n\n=== Audit Findings ===\n" + auditResult.executionLog();
+            writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.SUCCESS, summary, thread);
+
+            return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), summary);
+        } catch (Exception e) {
+            logger.error("Error executing AUDITOR for project '{}'", projectPath, e);
+            String errorSummary = "Audit failed: " + e.getMessage();
+            writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.MAX_ITERATIONS_REACHED, errorSummary, thread);
+            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), errorSummary);
+        }
+    }
+
     public SwarmResult generateCode(Path projectPath, int maxLoops) {
         return generateCode(projectPath, maxLoops, null);
     }
@@ -55,6 +108,10 @@ public class SwarmOrchestrator {
         var thread = new ExecutionThread();
 
         String customGoal = (objective != null && !objective.isBlank()) ? " Objective: " + objective : "";
+        boolean taskMdPresent = Files.exists(projectPath.resolve("task.md"));
+        String taskMdInstruction = taskMdPresent
+                ? "\nTASK.MD ACTIVE: 'task.md' is present! You MUST implement the changes, architecture improvements, and test requirements defined in 'task.md'. In this mode, you ARE PERMITTED AND REQUIRED to update README.md, context.md, and api.md to stay in sync with the new implementation."
+                : "\nSPECIFICATION INTEGRITY: 'task.md' is not present. README.md, context.md, and api.md are immutable specifications and must NOT be modified.";
 
         // PHASE 1: UNIT_TESTER (Steps 1, 2, 3, 4)
         Path existingRobotFile = findRobotFile(projectPath);
@@ -63,7 +120,7 @@ public class SwarmOrchestrator {
                 : "";
 
         String unitTestTask = """
-                Read context.md and api.md.%s%s
+                Read context.md, api.md, and README.md.%s%s%s
                 1. Generate comprehensive unit tests (JUnit 5 for Java under src/test/java, or Vitest for Vue under tests/unit or src/).
                 CRITICAL: In tests, assert `assertFalse(result.isValid())` and `assertTrue(errors.contains("..."))`. NEVER assert exact error list size (do NOT use `assertEquals(3, errors.size())`).
                 CRITICAL: Unit tests must assert the TRUE specification requirements. Do NOT write tests that expect dummy behavior or placeholder errors.
@@ -71,7 +128,7 @@ public class SwarmOrchestrator {
                 3. In Java, DO NOT use regular expressions. Use Character.isDigit, Character.isUpperCase, and simple string checks (contains('@'), etc.).
                 4. You MUST call fileSystemWriter separately for EVERY file created (pom.xml, classes, tests). NEVER output code in text responses.
                 5. In your response, report what tests were created and what edge cases they cover.
-                """.formatted(customGoal, robotInstruction);
+                """.formatted(customGoal, taskMdInstruction, robotInstruction);
 
         String testReport = "";
         boolean phase1Passed = false;
@@ -127,14 +184,15 @@ public class SwarmOrchestrator {
 
         // PHASE 2: CODER (Steps 5, 6)
         String coderTask = """
-                Unit tests (and any Robot tests) are passing with initial dummy code.%s%s
+                Unit tests (and any Robot tests) are passing with initial dummy code.%s%s%s
                 1. Inspect all files for 'TODO' comments and dummy stubs.
                 2. Replace all dummy implementations with full production-ready code matching context.md and api.md.
                 3. Remove resolved 'TODO' comments.
                 4. Ensure all unit tests AND any existing Robot Framework tests continue to pass. If an existing unit test asserted dummy-specific behavior, adjust the assertion to match the specification.
                 5. When writing regex in Java, ensure valid backslash escaping (\\\\d, \\\\w).
                 5. Use fileSystemWriter to write the updated production files.
-                """.formatted(customGoal, robotInstruction);
+                7. If task.md is present, synchronize README.md, context.md, and api.md with the new implementation.
+                """.formatted(customGoal, taskMdInstruction, robotInstruction);
 
         boolean phase2Passed = false;
         String coderSummary = "";
@@ -183,15 +241,16 @@ public class SwarmOrchestrator {
         // PHASE 3: VALIDATOR (Step 7)
         logger.info("Invoking VALIDATOR for final quality verification...");
         String validatorTask = """
-                All unit tests pass and production code has been implemented.%s
-                Verify that the implementation satisfies all requirements in context.md, api.md, and README.md.
-                CRITICAL: Do NOT modify or overwrite README.md, context.md, or api.md! Those are immutable specification files.
+                All unit tests pass and production code has been implemented.%s%s
+                Verify that the implementation satisfies all requirements in context.md, api.md, and README.md (and task.md if present).
+                If task.md is present, ensure README.md, api.md, and context.md have been updated to reflect the new state.
+                If task.md is NOT present, ensure README.md, api.md, and context.md were NOT modified.
                 Summarize:
                 1. Requirement verification status against specification.
                 2. Unit test suite and Robot test suite verification.
                 3. Production components implemented.
                 4. Verification status (all tests passing).
-                """.formatted(customGoal);
+                """.formatted(customGoal, taskMdInstruction);
 
         try {
             AgentResult valResult = agentService.executeTask(projectPath, AgentType.VALIDATOR, validatorTask);
@@ -300,15 +359,20 @@ public class SwarmOrchestrator {
     public SwarmResult generateRobotTests(Path projectPath, int maxLoops) {
         logger.info("Executing ROBOT_TESTER loop for project '{}' with max loops: {}", projectPath, maxLoops);
         var thread = new ExecutionThread();
+        boolean taskMdPresent = Files.exists(projectPath.resolve("task.md"));
+        String taskMdInstruction = taskMdPresent
+                ? "\nTASK.MD ACTIVE: 'task.md' is present! Generate or update Robot Framework acceptance tests according to task.md requirements."
+                : "";
+
         String taskDescription = """
-                Read context.md and api.md. Generate a simple, clean, and declarative Robot Framework test file (*.robot) for acceptance test scenarios (valid and invalid cases).
-                Write the file to src/test/robotframework/credentials_validation.robot using the fileSystemWriter tool.
+                Read context.md and api.md.%s Generate a simple, clean, and declarative Robot Framework test file (*.robot) for acceptance test scenarios (valid and invalid cases).
+                Write the file to robots/credentials_validation.robot using the fileSystemWriter tool.
                 RULES:
                 - Keep tests simple and declarative using test cases and keywords.
                 - Under *** Settings ***, explicitly import 'Library    Collections' and 'Library    String'.
                 - Do NOT invent fake keywords like 'Should Be False' or 'Should Contain Key'. Use standard assertions: 'Should Be Equal', 'Should Be True'.
                 - Do NOT import Java classes. Do NOT create .py files.
-                """;
+                """.formatted(taskMdInstruction);
 
         for (int loop = 1; loop <= maxLoops; loop++) {
             logger.info("Robot test generation iteration {}/{}", loop, maxLoops);
@@ -440,9 +504,17 @@ public class SwarmOrchestrator {
     }
 
     protected Path findRobotFile(Path projectPath) {
+        Path dedicatedRobotsDir = projectPath.resolve("robots");
+        if (Files.isDirectory(dedicatedRobotsDir)) {
+            try (Stream<Path> stream = Files.walk(dedicatedRobotsDir, 3)) {
+                Path found = stream.filter(p -> p.toString().endsWith(".robot")).findFirst().orElse(null);
+                if (found != null) return found;
+            } catch (Exception ignored) {}
+        }
+
         try (Stream<Path> stream = Files.walk(projectPath, 10)) {
             return stream
-                    .filter(p -> !p.toString().contains("/target/") && !p.toString().contains("/.git/"))
+                    .filter(p -> !p.toString().contains("/target/") && !p.toString().contains("/.git/") && !p.toString().contains("/node_modules/"))
                     .filter(p -> p.toString().endsWith(".robot"))
                     .findFirst()
                     .orElse(null);
@@ -508,6 +580,8 @@ public class SwarmOrchestrator {
                 return new StateTransition(AgentType.VALIDATOR, "The project has been implemented and tested. Verify that the implementation satisfies context.md, api.md, and README.md. Do NOT overwrite or modify README.md, context.md, or api.md. Summarize the verification status.");
             case VALIDATOR:
                 return new StateTransition(null, "Task complete."); // null indicates completion
+            case AUDITOR:
+                return new StateTransition(null, "Audit complete.");
             default:
                 throw new IllegalStateException("Unhandled agent type in state transition: " + currentAgent);
         }

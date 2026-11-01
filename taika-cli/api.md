@@ -4,6 +4,16 @@ This document defines the interface and contract for the Command Line Interface 
 
 ## CLI Command Interface
 
+### Command: `taika audit`
+Performs a comprehensive quality, architectural, and test effectiveness audit of the target repository. Generates `taika-report-audit.html` and creates `task.md` outlining concrete code, architecture, and test fixes.
+
+* **Arguments & Flags:**
+    * `--path, -p` (Required, String): Path to the target project root.
+* **Example Usage:**
+  ```bash
+  taika audit --path /home/tero/cases/lumo-auth-service
+  ```
+
 ### Command: `taika execution`
 Triggers full multi-agent swarm orchestration for a targeted local repository.
 

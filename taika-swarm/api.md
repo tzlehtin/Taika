@@ -21,6 +21,10 @@ The primary service used by external modules (like `taika-cli`) to start and mon
         * `maxLoops` (int): Maximum compile/test self-healing cycles per phase.
         * `objective` (String): Optional custom goal or requirement.
     * **Output:** A `SwarmResult` DTO confirming completion of the 7-step deterministic TDD workflow (Unit tests + Dummy stubs -> Verification -> Production implementation -> Final validation report). Validates that both unit tests and any existing Robot Framework tests pass in both verification phases.
+* **Method:** `public SwarmResult audit(Path projectPath)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory containing code and specification files.
+    * **Output:** A `SwarmResult` DTO confirming completion of the audit, generation of `taika-report-audit.html`, and creation of `task.md`.
 
 ### Supporting Data Structures
 

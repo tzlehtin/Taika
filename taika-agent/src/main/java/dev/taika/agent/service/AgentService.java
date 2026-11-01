@@ -108,11 +108,51 @@ public class AgentService {
         return switch (agentType) {
             case ROBOT_TESTER -> new String[]{"*.md", "pom.xml", "package.json", "*.robot"};
             case VALIDATOR -> new String[]{"*.md", "pom.xml", "package.json"};
+            case AUDITOR -> new String[]{"*.java", "*.vue", "*.ts", "*.js", "*.md", "pom.xml", "package.json", "*.env", "*.robot"};
             default -> new String[]{"*.java", "*.vue", "*.ts", "*.js", "*.md", "pom.xml", "package.json", "*.env", "*.robot"};
         };
     }
 
     private String resolveSystemPrompt(AgentType agentType) {
+        if (agentType == AgentType.AUDITOR) {
+            return """
+                You are a Principal Software Architect and Quality Assurance Auditor.
+                Your mission is to perform a strict, uncompromising audit of the target project.
+
+                AUDIT SCOPE:
+                1. Adherence to Specifications: Compare existing code against `README.md`, `context.md`, and `api.md`.
+                2. Architecture & Design: Identify missing annotations (e.g. Spring `@Service`), lack of structured error models (e.g. field-specific error DTOs instead of raw strings), thread safety, and maintainability.
+                3. Test Effectiveness vs Fake Tests: Inspect test suites (both JUnit/Vitest and Robot Framework).
+                   - Flag tautological or fake assertions (e.g. Robot tests that only assert their own parameters without calling production logic or APIs).
+                   - Verify edge case coverage, boundary conditions, and true functional verification.
+                4. Code Quality & Security: Inspect input validation robustness (e.g. email/password rules) and potential edge-case leaks.
+
+                OUTPUT REQUIREMENTS:
+                - In your text response, provide an in-depth, structured Audit Report covering: Executive Summary, Component Architecture, Test Effectiveness, and Required Fixes.
+
+                STOPPING CONDITION & TASK.MD RULE:
+                - IF THE CODE IS ALREADY GOOD AND SUFFICIENT (passes specifications, good architecture, true non-fake tests):
+                  - State explicitly in your report: "AUDIT STATUS: PASSED - Code and tests meet quality standards. No further action needed."
+                  - Do NOT invent artificial tasks or nitpicks.
+                  - Do NOT create `task.md`.
+                - ONLY IF THERE ARE REAL DEFECTS, ARCHITECTURAL GAPS, OR FAKE/INEFFECTIVE TESTS:
+                  - State in your report: "AUDIT STATUS: ACTION_REQUIRED".
+                  - You MUST use the `fileSystemWriter` tool to create `task.md` in the project root directory.
+
+                TASK.MD FORMAT (ONLY WHEN ACTION_REQUIRED):
+                `task.md` MUST be written in plain language using the exact structured syntax style of README.md, context.md, and api.md:
+                  # Task: [Clear title of the maintenance/upgrade goal]
+                  ## Context & Problem Statement
+                  [Clear explanation of the gaps identified during audit]
+                  ## Required Specification Updates
+                  [Exact updates needed in README.md, context.md, or api.md]
+                  ## Required Implementation Changes
+                  [Concrete changes required in production classes]
+                  ## Test Verification Requirements
+                  [Real test assertions that must be written and verified]
+                """;
+        }
+
         if (agentType == AgentType.ROBOT_TESTER) {
             return """
                 You are a specialized Robot Framework QA Engineer.
@@ -129,7 +169,8 @@ public class AgentService {
                 4. Keep keywords extremely simple and declarative. Do NOT attempt to implement complex validation algorithms inside Robot.
                    Define high-level user scenario keywords (e.g. `Validate Credentials`, `Check Validation Status`) with simple assertions.
                 5. NEVER import Java classes (e.g. `Library com.lumo...`) and NEVER create separate .py files.
-                6. You MUST call `fileSystemWriter` tool immediately to write the `.robot` file.
+                6. Write the test suite to `robots/credentials_validation.robot`.
+                7. You MUST call `fileSystemWriter` tool immediately to write the `.robot` file.
                 
                 EXAMPLE OF A CLEAN, VALID .ROBOT FILE:
                 *** Settings ***
@@ -201,6 +242,7 @@ public class AgentService {
                 6. CRITICAL TOOL CALL MANDATE:
                    - You MUST call `fileSystemWriter` for EVERY file you modify.
                    - NEVER output file contents directly in your text response.
+                   - When task.md is present in the context, update README.md, api.md, and context.md to reflect the new state.
                    - In your final text response, summarize which components you implemented and which TODOs were resolved.
                 """;
         }
@@ -209,8 +251,9 @@ public class AgentService {
             return """
                 You are a Quality Gate and Verification Engineer.
                 Your task is to review the code and tests against context.md, api.md, and README.md.
-                CRITICAL RULE: NEVER modify or overwrite README.md, context.md, or api.md! Those are immutable specification files defining the project requirements.
-                In your final text response, provide a concise summary of the verification status, satisfied requirements, and test results. Do NOT use fileSystemWriter on specification files.
+                CRITICAL RULE: If task.md is NOT present, NEVER modify README.md, context.md, or api.md!
+                If task.md IS present, verify that README.md, context.md, and api.md have been updated to match task.md.
+                In your final text response, provide a concise summary of the verification status, satisfied requirements, and test results.
                 """;
         }
 

@@ -73,7 +73,7 @@ mvn clean install -U
 
 3.  **Run the Application**: Execute the CLI application from the project root directory:
     ```bash
-    java -jar taika-cli/target/taika-cli-0.2.0-SNAPSHOT.jar
+    java -jar taika-cli/target/taika-cli-0.3.0-SNAPSHOT.jar
     ```
 
 4.  **Execute a Task**: Once the Spring Shell prompt (`shell:>` aukeaa) appears, you can trigger the agent swarm with the `execution` command:

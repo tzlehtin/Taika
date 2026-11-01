@@ -16,6 +16,7 @@ class AgentTypeTest {
         assertNotNull(AgentType.CODER);
         assertNotNull(AgentType.TESTER);
         assertNotNull(AgentType.VALIDATOR);
+        assertNotNull(AgentType.AUDITOR);
 
         // Verify that valueOf works as expected.
         assertEquals(AgentType.CODER, AgentType.valueOf("CODER"));

@@ -27,5 +27,9 @@ public enum AgentType {
     /**
      * Responsible for guarding the quality gate. Parses compiler logs and coverage metrics to issue precise change loops.
      */
-    VALIDATOR
+    VALIDATOR,
+    /**
+     * Responsible for deep architectural, code quality, and test effectiveness auditing. Generates task.md and quality reports.
+     */
+    AUDITOR
 }

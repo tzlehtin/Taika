@@ -54,6 +54,53 @@ class SwarmOrchestratorTest {
     }
 
     @Test
+    void audit_shouldSucceedAndGenerateReport() {
+        // Arrange
+        var successResult = new AgentResult(
+                UUID.randomUUID().toString(),
+                "SUCCESS",
+                "Audit completed",
+                List.of("/fake/project/task.md"),
+                "Audit findings: tests are tautological."
+        );
+        when(agentService.executeTask(eq(fakePath), eq(AgentType.AUDITOR), anyString())).thenReturn(successResult);
+
+        // Act
+        SwarmResult result = swarmOrchestrator.audit(fakePath);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+        assertTrue(result.finalSummary().contains("Project Audit Complete!"));
+        assertEquals(1, result.invocationHistory().size());
+        assertEquals(AgentType.AUDITOR, result.invocationHistory().get(0).type());
+    }
+
+    @Test
+    void audit_shouldDeleteStaleTaskMdWhenAuditPasses(@TempDir Path tempDir) throws java.io.IOException {
+        // Arrange
+        Path taskMd = tempDir.resolve("task.md");
+        java.nio.file.Files.writeString(taskMd, "Old task content");
+        assertTrue(java.nio.file.Files.exists(taskMd));
+
+        var cleanResult = new AgentResult(
+                UUID.randomUUID().toString(),
+                "SUCCESS",
+                "Audit passed",
+                List.of(),
+                "AUDIT STATUS: PASSED - All quality rules and tests verified."
+        );
+        when(agentService.executeTask(eq(tempDir), eq(AgentType.AUDITOR), anyString())).thenReturn(cleanResult);
+
+        // Act
+        SwarmResult result = swarmOrchestrator.audit(tempDir);
+
+        // Assert
+        assertEquals(SwarmStatus.SUCCESS, result.status());
+        assertFalse(java.nio.file.Files.exists(taskMd), "task.md should be deleted when audit passes cleanly");
+        assertTrue(result.finalSummary().contains("CLEAN"));
+    }
+
+    @Test
     void generateRobotTests_shouldRetryAndSucceedWhenDryRunFailsInitially() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
