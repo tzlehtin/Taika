@@ -226,7 +226,16 @@ class SwarmOrchestratorTest {
         String result = swarmOrchestrator.runSpotBugsAnalysis(tempDir);
 
         // Assert
-        assertTrue(result.contains("Static Analysis (SpotBugs)"));
+        assertTrue(result.contains("SpotBugs (4.8.6.6)"));
+    }
+
+    @Test
+    void runCheckstyleAnalysis_shouldReportPassedWhenNoResultXmlFound(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runCheckstyleAnalysis(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Java Linter (Checkstyle 3.4.0)"));
     }
 
     @Test
