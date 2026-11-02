@@ -64,6 +64,10 @@ public class SwarmOrchestrator {
     }
 
     public SwarmResult pipeline(Path projectPath, int maxLoops, String objective) {
+        return pipeline(projectPath, maxLoops, objective, false);
+    }
+
+    public SwarmResult pipeline(Path projectPath, int maxLoops, String objective, boolean scanVulnerabilities) {
         logger.info("Executing automated pipeline (gen-robots -> gen-code -> audit) for project '{}' with max loops: {}", projectPath, maxLoops);
 
         // Step 1: gen-robots
@@ -86,7 +90,7 @@ public class SwarmOrchestrator {
 
         // Step 3: audit
         logger.info("=== PIPELINE STEP 3/3: Executing quality, architecture, and test effectiveness audit ===");
-        SwarmResult auditResult = audit(projectPath);
+        SwarmResult auditResult = scanVulnerabilities ? audit(projectPath, true) : audit(projectPath);
 
         String combinedSummary = String.format(
                 "Pipeline Execution Complete (gen-robots -> gen-code -> audit)!\n\n" +
@@ -103,11 +107,15 @@ public class SwarmOrchestrator {
      * generating `taika-report-audit.html` and `task.md`.
      */
     public SwarmResult audit(Path projectPath) {
-        logger.info("Starting audit for project '{}'", projectPath);
+        return audit(projectPath, false);
+    }
+
+    public SwarmResult audit(Path projectPath, boolean scanVulnerabilities) {
+        logger.info("Starting audit for project '{}' (scanVulnerabilities={})", projectPath, scanVulnerabilities);
         var thread = new ExecutionThread();
 
         // Execute automated build, test, and code coverage diagnostics before invoking AI
-        String diagnostics = runAuditDiagnostics(projectPath);
+        String diagnostics = runAuditDiagnostics(projectPath, scanVulnerabilities);
         logger.info("Audit diagnostics collected:\n{}", diagnostics);
 
         String auditTask = """
@@ -161,6 +169,10 @@ public class SwarmOrchestrator {
     }
 
     protected String runAuditDiagnostics(Path projectPath) {
+        return runAuditDiagnostics(projectPath, false);
+    }
+
+    protected String runAuditDiagnostics(Path projectPath, boolean scanVulnerabilities) {
         StringBuilder sb = new StringBuilder();
         boolean hasPom = Files.exists(projectPath.resolve("pom.xml"));
         boolean hasPackageJson = Files.exists(projectPath.resolve("package.json"));
@@ -198,6 +210,14 @@ public class SwarmOrchestrator {
                 // Run Java Linter (Checkstyle)
                 String linterAnalysis = runCheckstyleAnalysis(projectPath);
                 sb.append(linterAnalysis).append("\n");
+
+                // Run Dependency Vulnerability Scan (OWASP Dependency-Check) if explicitly enabled
+                if (scanVulnerabilities) {
+                    String owaspAnalysis = runOwaspDependencyCheck(projectPath);
+                    sb.append(owaspAnalysis).append("\n");
+                } else {
+                    sb.append("Vulnerability Scan (OWASP Dependency-Check): SKIPPED (Enable with --scan-vulnerabilities / -s or 'security-scan')\n");
+                }
             } catch (Exception e) {
                 sb.append("Maven execution error: ").append(e.getMessage()).append("\n");
             }
@@ -212,6 +232,14 @@ public class SwarmOrchestrator {
                 // Run Static Analysis / Typecheck for Vue / TypeScript
                 String staticAnalysis = runNpmStaticAnalysis(projectPath);
                 sb.append(staticAnalysis).append("\n");
+
+                // Run Dependency Vulnerability Scan (npm audit) if explicitly enabled
+                if (scanVulnerabilities) {
+                    String npmAuditAnalysis = runNpmAuditScan(projectPath);
+                    sb.append(npmAuditAnalysis).append("\n");
+                } else {
+                    sb.append("Vulnerability Scan (npm audit): SKIPPED (Enable with --scan-vulnerabilities / -s or 'security-scan')\n");
+                }
         } else {
             sb.append("No pom.xml or package.json found in project directory.\n");
         }
@@ -322,6 +350,115 @@ public class SwarmOrchestrator {
             }
         } catch (Exception e) {
             sb.append("Java Linter (Checkstyle 3.4.0): Could not execute (").append(e.getMessage()).append(")\n");
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runOwaspDependencyCheck(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        long startTime = System.currentTimeMillis();
+        java.util.concurrent.atomic.AtomicBoolean running = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread heartbeat = new Thread(() -> {
+            while (running.get()) {
+                try {
+                    Thread.sleep(15000);
+                } catch (InterruptedException ignored) {
+                    break;
+                }
+                if (running.get()) {
+                    long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                    logger.info("... OWASP Dependency-Check still running (downloading/analyzing CVE data, {}s elapsed) ...", elapsed);
+                }
+            }
+        });
+        heartbeat.setDaemon(true);
+        heartbeat.start();
+
+        try {
+            logger.info("Executing OWASP Dependency-Check on: {}", projectPath);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "mvn", "org.owasp:dependency-check-maven:10.0.4:check",
+                    "-DfailOnError=false", "-Dformat=JSON",
+                    "-DnvdValidForHours=720", "-DretireJsAnalyzerEnabled=false",
+                    "-B"
+            );
+            pb.directory(projectPath.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                    if (line.contains("Download Started") || line.contains("Download Complete") ||
+                            line.contains("Processing") || line.contains("NVD CVE")) {
+                        logger.info("[OWASP] {}", line.trim());
+                    }
+                }
+            }
+            process.waitFor();
+
+            Path reportJson = projectPath.resolve("target/dependency-check-report.json");
+            if (Files.exists(reportJson)) {
+                String json = Files.readString(reportJson);
+                int vulnCount = 0;
+                if (json.contains("\"vulnerabilities\": [")) {
+                    String[] parts = json.split("\"vulnerabilities\":\\s*\\[");
+                    for (int i = 1; i < parts.length; i++) {
+                        String block = parts[i].split("\\]")[0];
+                        if (!block.trim().isEmpty()) {
+                            vulnCount += block.split("\"name\":").length - 1;
+                        }
+                    }
+                }
+                if (vulnCount > 0) {
+                    sb.append("Vulnerability Scan (OWASP Dependency-Check): FAILED (").append(vulnCount).append(" CVE vulnerability/vulnerabilities detected)\n");
+                } else {
+                    sb.append("Vulnerability Scan (OWASP Dependency-Check): PASSED (0 known CVE vulnerabilities)\n");
+                }
+            } else {
+                sb.append("Vulnerability Scan (OWASP Dependency-Check): PASSED (0 known CVE vulnerabilities)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Vulnerability Scan (OWASP Dependency-Check): Could not execute (").append(e.getMessage()).append(")\n");
+        } finally {
+            running.set(false);
+            heartbeat.interrupt();
+        }
+        return sb.toString().trim();
+    }
+
+    public String scanVulnerabilities(Path projectPath) {
+        boolean hasPom = Files.exists(projectPath.resolve("pom.xml"));
+        boolean hasPackageJson = Files.exists(projectPath.resolve("package.json"));
+        StringBuilder sb = new StringBuilder();
+        if (hasPom) {
+            sb.append(runOwaspDependencyCheck(projectPath)).append("\n");
+        }
+        if (hasPackageJson) {
+            sb.append(runNpmAuditScan(projectPath)).append("\n");
+        }
+        if (!hasPom && !hasPackageJson) {
+            sb.append("No pom.xml or package.json found in ").append(projectPath).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runNpmAuditScan(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            logger.info("Executing npm audit on: {}", projectPath);
+            TestRunResult auditResult = runProcess(projectPath, "npm", "audit", "--json");
+            String output = auditResult.output();
+            if (output != null && output.contains("\"vulnerabilities\"") && !auditResult.passed() && !output.contains("\"total\": 0") && !output.contains("\"total\":0")) {
+                sb.append("Vulnerability Scan (npm audit): FAILED (Vulnerabilities detected)\n");
+                String snippet = output.length() > 400 ? output.substring(0, 400) + "... [truncated]" : output;
+                sb.append("  Details:\n").append(snippet).append("\n");
+            } else {
+                sb.append("Vulnerability Scan (npm audit): PASSED (0 known vulnerabilities)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Vulnerability Scan (npm audit): Could not execute (").append(e.getMessage()).append(")\n");
         }
         return sb.toString().trim();
     }

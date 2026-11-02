@@ -187,6 +187,9 @@ public class AgentService {
                    - Robot Acceptance Testing:
                      * In Java: Must execute a real binary or CLI runner (via Process library) or live HTTP server.
                      * In Vue: Must verify genuine contract execution or real component rendering, never standalone parameter loops.
+                5. DEPENDENCY VULNERABILITY AUDIT (OWASP / npm audit):
+                   - Inspect the vulnerability scan results in the diagnostics.
+                   - If CVE or dependency vulnerabilities are reported (FAILED), list the vulnerabilities and require updating the vulnerable dependency versions in `task.md`.
 
                 AUDITOR ROLE BOUNDARY MANDATE:
                 - You are an AUDITOR, NOT A CODER.

@@ -9,9 +9,11 @@ Performs a comprehensive quality, architectural, and test effectiveness audit of
 
 * **Arguments & Flags:**
     * `--path, -p` (Required, String): Path to the target project root.
+    * `--scan-vulnerabilities, --security, -s` (Optional, Boolean, Default: false): Includes deep CVE dependency checks (OWASP / npm audit).
 * **Example Usage:**
   ```bash
   taika audit --path /home/tero/cases/lumo-auth-service
+  taika audit --path /home/tero/cases/lumo-auth-service --security
   ```
 
 ### Command: `taika execution`

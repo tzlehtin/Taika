@@ -25,6 +25,14 @@ The primary service used by external modules (like `taika-cli`) to start and mon
     * **Input:**
         * `projectPath` (Path): The target project directory containing code and specification files.
     * **Output:** A `SwarmResult` DTO confirming completion of the audit, generation of `taika-report-audit.html`, and creation of `task.md`.
+* **Method:** `public SwarmResult audit(Path projectPath, boolean scanVulnerabilities)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory.
+        * `scanVulnerabilities` (boolean): Whether to run deep CVE vulnerability checks (OWASP Dependency-Check / npm audit).
+* **Method:** `public String scanVulnerabilities(Path projectPath)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory.
+    * **Output:** Direct formatted summary of OWASP Dependency-Check and npm audit results.
 * **Method:** `public SwarmResult pipeline(Path projectPath, int maxLoops, String objective)`
     * **Input:**
         * `projectPath` (Path): The target project directory containing specification files.

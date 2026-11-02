@@ -16,8 +16,12 @@ This module is the user-facing entry point for the entire Taika system. It provi
     *   `gen-code --path <project-path> --max-loops 3`
 *   **`audit`**: Performs architectural, code quality, and test effectiveness analysis, outputting `taika-report-audit.html` and generating `task.md` when fixes are required.
     *   `audit --path <project-path>`
+    *   `audit --path <project-path> --security`
+*   **`security-scan`** (alias: `owasp-scan`): Performs standalone deep dependency vulnerability scanning (OWASP Dependency-Check / npm audit).
+    *   `security-scan --path <project-path>`
 *   **`pipeline`** (aliases: `flow`, `auto`): Executes the entire pipeline in sequence (`gen-robots` -> `gen-code` -> `audit`).
     *   `pipeline --path <project-path> --max-loops 3`
+    *   `pipeline --path <project-path> --max-loops 3 --security`
 
 All commands can be invoked non-interactively directly from the command line using the executable JAR.
 

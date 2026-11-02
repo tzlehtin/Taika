@@ -239,6 +239,24 @@ class SwarmOrchestratorTest {
     }
 
     @Test
+    void runOwaspDependencyCheck_shouldReportPassedWhenNoReportFound(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runOwaspDependencyCheck(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Vulnerability Scan (OWASP Dependency-Check)"));
+    }
+
+    @Test
+    void runNpmAuditScan_shouldReportPassedWhenClean(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runNpmAuditScan(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Vulnerability Scan (npm audit)"));
+    }
+
+    @Test
     void runNpmStaticAnalysis_shouldDetectTsConfigAndExecute(@TempDir Path tempDir) throws java.io.IOException {
         // Arrange
         java.nio.file.Files.writeString(tempDir.resolve("tsconfig.json"), "{}");
