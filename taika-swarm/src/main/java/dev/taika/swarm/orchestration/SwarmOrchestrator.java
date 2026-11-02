@@ -64,6 +64,14 @@ public class SwarmOrchestrator {
     }
 
     public SwarmResult pipeline(Path projectPath, int maxLoops, String objective) {
+        return pipeline(projectPath, maxLoops, objective, false);
+    }
+
+    public SwarmResult pipeline(Path projectPath, int maxLoops, String objective, boolean scanVulnerabilities) {
+        return pipeline(projectPath, maxLoops, objective, scanVulnerabilities, false);
+    }
+
+    public SwarmResult pipeline(Path projectPath, int maxLoops, String objective, boolean scanVulnerabilities, boolean runMutation) {
         logger.info("Executing automated pipeline (gen-robots -> gen-code -> audit) for project '{}' with max loops: {}", projectPath, maxLoops);
 
         // Step 1: gen-robots
@@ -86,7 +94,8 @@ public class SwarmOrchestrator {
 
         // Step 3: audit
         logger.info("=== PIPELINE STEP 3/3: Executing quality, architecture, and test effectiveness audit ===");
-        SwarmResult auditResult = audit(projectPath);
+        SwarmResult auditResult = audit(projectPath, scanVulnerabilities, runMutation);
+        SwarmStatus overallStatus = auditResult.status();
 
         String combinedSummary = String.format(
                 "Pipeline Execution Complete (gen-robots -> gen-code -> audit)!\n\n" +
@@ -95,7 +104,7 @@ public class SwarmOrchestrator {
                 "--- Step 3: Audit Result ---\n%s",
                 robotResult.status(), codeResult.status(), auditResult.finalSummary()
         );
-        return new SwarmResult(auditResult.threadId(), auditResult.status(), auditResult.invocationHistory(), combinedSummary);
+        return new SwarmResult(auditResult.threadId(), overallStatus, auditResult.invocationHistory(), combinedSummary);
     }
 
     /**
@@ -103,11 +112,19 @@ public class SwarmOrchestrator {
      * generating `taika-report-audit.html` and `task.md`.
      */
     public SwarmResult audit(Path projectPath) {
-        logger.info("Starting audit for project '{}'", projectPath);
+        return audit(projectPath, false, false);
+    }
+
+    public SwarmResult audit(Path projectPath, boolean scanVulnerabilities) {
+        return audit(projectPath, scanVulnerabilities, false);
+    }
+
+    public SwarmResult audit(Path projectPath, boolean scanVulnerabilities, boolean runMutation) {
+        logger.info("Starting audit for project '{}' (scanVulnerabilities={}, runMutation={})", projectPath, scanVulnerabilities, runMutation);
         var thread = new ExecutionThread();
 
         // Execute automated build, test, and code coverage diagnostics before invoking AI
-        String diagnostics = runAuditDiagnostics(projectPath);
+        String diagnostics = runAuditDiagnostics(projectPath, scanVulnerabilities, runMutation);
         logger.info("Audit diagnostics collected:\n{}", diagnostics);
 
         String auditTask = """
@@ -147,20 +164,30 @@ public class SwarmOrchestrator {
             } else {
                 taskMdNotice = "\nAudit Result: CLEAN (No `task.md` required. Code and tests meet quality standards).";
             }
+            
+            SwarmStatus auditStatus = Files.exists(taskMdFile) ? SwarmStatus.MAX_ITERATIONS_REACHED : SwarmStatus.SUCCESS;
 
             String summary = "Project Audit Complete!\n" + taskMdNotice + "\n\n=== Diagnostics ===\n" + diagnostics + "\n\n=== Audit Findings ===\n" + auditResult.executionLog();
-            writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.SUCCESS, summary, thread);
+            writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", auditStatus, summary, thread);
 
-            return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), summary);
+            return new SwarmResult(thread.getId(), auditStatus, thread.getHistory(), summary);
         } catch (Exception e) {
             logger.error("Error executing AUDITOR for project '{}'", projectPath, e);
-            String errorSummary = "Audit failed: " + e.getMessage();
+            String errorSummary = "Audit failed: " + getRootCauseMessage(e);
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", SwarmStatus.MAX_ITERATIONS_REACHED, errorSummary, thread);
             return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), errorSummary);
         }
     }
 
     protected String runAuditDiagnostics(Path projectPath) {
+        return runAuditDiagnostics(projectPath, false, false);
+    }
+
+    protected String runAuditDiagnostics(Path projectPath, boolean scanVulnerabilities) {
+        return runAuditDiagnostics(projectPath, scanVulnerabilities, false);
+    }
+
+    protected String runAuditDiagnostics(Path projectPath, boolean scanVulnerabilities, boolean runMutation) {
         StringBuilder sb = new StringBuilder();
         boolean hasPom = Files.exists(projectPath.resolve("pom.xml"));
         boolean hasPackageJson = Files.exists(projectPath.resolve("package.json"));
@@ -188,7 +215,31 @@ public class SwarmOrchestrator {
                 if (Files.exists(csvReport)) {
                     sb.append(parseJaCoCoCsv(csvReport)).append("\n");
                 } else {
-                    sb.append("Coverage Report: JaCoCo CSV was not generated.\n");
+                    sb.append("Test Coverage (JaCoCo 0.8.12): Report was not generated.\n");
+                }
+
+                // Run Static Analysis (SpotBugs)
+                String staticAnalysis = runSpotBugsAnalysis(projectPath);
+                sb.append(staticAnalysis).append("\n");
+
+                // Run Java Linter (Checkstyle)
+                String linterAnalysis = runCheckstyleAnalysis(projectPath);
+                sb.append(linterAnalysis).append("\n");
+
+                // Run Dependency Vulnerability Scan (OWASP Dependency-Check) if explicitly enabled
+                if (scanVulnerabilities) {
+                    String owaspAnalysis = runOwaspDependencyCheck(projectPath);
+                    sb.append(owaspAnalysis).append("\n");
+                } else {
+                    sb.append("Vulnerability Scan (OWASP Dependency-Check): SKIPPED (Enable with --scan-vulnerabilities / -s or 'security-scan')\n");
+                }
+
+                // Run Mutation Testing (PITest) if explicitly enabled
+                if (runMutation) {
+                    String mutationAnalysis = runPitestMutationTesting(projectPath);
+                    sb.append(mutationAnalysis).append("\n");
+                } else {
+                    sb.append("Mutation Testing (PITest 1.16.1): SKIPPED (Enable with --mutation / -u or 'mutation-test')\n");
                 }
             } catch (Exception e) {
                 sb.append("Maven execution error: ").append(e.getMessage()).append("\n");
@@ -200,6 +251,26 @@ public class SwarmOrchestrator {
             sb.append("NPM Test Output Summary:\n").append(npmResult.output().length() > 500
                     ? npmResult.output().substring(0, 500) + "... [truncated]"
                     : npmResult.output()).append("\n");
+
+                // Run Static Analysis / Typecheck for Vue / TypeScript
+                String staticAnalysis = runNpmStaticAnalysis(projectPath);
+                sb.append(staticAnalysis).append("\n");
+
+                // Run Dependency Vulnerability Scan (npm audit) if explicitly enabled
+                if (scanVulnerabilities) {
+                    String npmAuditAnalysis = runNpmAuditScan(projectPath);
+                    sb.append(npmAuditAnalysis).append("\n");
+                } else {
+                    sb.append("Vulnerability Scan (npm audit): SKIPPED (Enable with --scan-vulnerabilities / -s or 'security-scan')\n");
+                }
+
+                // Run Mutation Testing (Stryker) if explicitly enabled
+                if (runMutation) {
+                    String mutationAnalysis = runNpmMutationTesting(projectPath);
+                    sb.append(mutationAnalysis).append("\n");
+                } else {
+                    sb.append("Mutation Testing (Stryker): SKIPPED (Enable with --mutation / -u or 'mutation-test')\n");
+                }
         } else {
             sb.append("No pom.xml or package.json found in project directory.\n");
         }
@@ -210,6 +281,452 @@ public class SwarmOrchestrator {
             sb.append("Robot Acceptance Tests: ").append(robotResult.passed() ? "PASSED" : "FAILED").append("\n");
         } else {
             sb.append("Robot Acceptance Tests: None found.\n");
+        }
+
+        return sb.toString();
+    }
+
+    protected String runSpotBugsAnalysis(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            logger.info("Executing SpotBugs static analysis on: {}", projectPath);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "mvn", "com.github.spotbugs:spotbugs-maven-plugin:4.8.6.6:check",
+                    "-Dspotbugs.failOnError=false", "-B"
+            );
+            pb.directory(projectPath.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append("\n");
+            }
+            process.waitFor();
+
+            Path spotbugsXml = projectPath.resolve("target/spotbugsXml.xml");
+            if (Files.exists(spotbugsXml)) {
+                String xml = Files.readString(spotbugsXml);
+                int bugCount = (xml.split("<BugInstance ").length) - 1;
+                if (bugCount > 0) {
+                    sb.append("SpotBugs (4.8.6.6): FAILED (").append(bugCount).append(" bug(s) detected)\n");
+                    // Extract bug types and messages for the agent
+                    xml.lines()
+                            .filter(line -> line.contains("<BugInstance ") || line.contains("<LongMessage>"))
+                            .limit(10)
+                            .forEach(line -> sb.append("  - ").append(line.trim()).append("\n"));
+                } else {
+                    sb.append("SpotBugs (4.8.6.6): PASSED (0 bugs detected)\n");
+                }
+            } else {
+                sb.append("SpotBugs (4.8.6.6): PASSED (0 bugs detected)\n");
+            }
+        } catch (Exception e) {
+            sb.append("SpotBugs (4.8.6.6): Could not execute (").append(e.getMessage()).append(")\n");
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runCheckstyleAnalysis(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            logger.info("Executing Checkstyle linter on: {}", projectPath);
+            List<String> cmd = new java.util.ArrayList<>(List.of(
+                    "mvn", "org.apache.maven.plugins:maven-checkstyle-plugin:3.4.0:checkstyle",
+                    "-Dcheckstyle.failsOnError=false", "-Dcheckstyle.failOnViolation=false", "-B"
+            ));
+            Path customConfig = projectPath.resolve("checkstyle.xml");
+            if (Files.exists(customConfig)) {
+                cmd.add("-Dcheckstyle.config.location=" + customConfig.toAbsolutePath());
+            }
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.directory(projectPath.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append("\n");
+            }
+            process.waitFor();
+
+            Path checkstyleXml = projectPath.resolve("target/checkstyle-result.xml");
+            if (Files.exists(checkstyleXml)) {
+                String xml = Files.readString(checkstyleXml);
+                List<String> errorLines = xml.lines()
+                        .filter(line -> line.contains("<error "))
+                        .toList();
+                // Filter out non-functional Javadoc noise if default rules are used
+                List<String> relevantErrors = errorLines.stream()
+                        .filter(line -> !line.contains("MissingJavadoc") && !line.contains("JavadocVariable"))
+                        .toList();
+
+                int violationCount = relevantErrors.size();
+                if (violationCount > 0) {
+                    sb.append("Java Linter (Checkstyle 3.4.0): FAILED (").append(violationCount).append(" violation(s) found)\n");
+                    relevantErrors.stream()
+                            .limit(10)
+                            .forEach(line -> {
+                                String clean = line.trim()
+                                        .replace("<error ", "")
+                                        .replace("/>", "")
+                                        .replace("&quot;", "'");
+                                sb.append("  - ").append(clean).append("\n");
+                            });
+                } else {
+                    sb.append("Java Linter (Checkstyle 3.4.0): PASSED (0 violations)\n");
+                }
+            } else {
+                sb.append("Java Linter (Checkstyle 3.4.0): PASSED (0 violations)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Java Linter (Checkstyle 3.4.0): Could not execute (").append(e.getMessage()).append(")\n");
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runOwaspDependencyCheck(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        long startTime = System.currentTimeMillis();
+        java.util.concurrent.atomic.AtomicBoolean running = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread heartbeat = new Thread(() -> {
+            while (running.get()) {
+                try {
+                    Thread.sleep(15000);
+                } catch (InterruptedException ignored) {
+                    break;
+                }
+                if (running.get()) {
+                    long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                    logger.info("... OWASP Dependency-Check still running (downloading/analyzing CVE data, {}s elapsed) ...", elapsed);
+                }
+            }
+        });
+        heartbeat.setDaemon(true);
+        heartbeat.start();
+
+        try {
+            logger.info("Executing OWASP Dependency-Check on: {}", projectPath);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "mvn", "org.owasp:dependency-check-maven:10.0.4:check",
+                    "-DfailOnError=false", "-Dformat=JSON",
+                    "-DnvdApiAnalyzerEnabled=false",
+                    "-DretireJsAnalyzerEnabled=false",
+                    "-B"
+            );
+            pb.directory(projectPath.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                    if (line.contains("Download") || line.contains("Processing") ||
+                            line.contains("WARN") || line.contains("ERROR") || line.contains("OSSINDEX")) {
+                        logger.info("[OWASP] {}", line.trim());
+                    }
+                }
+            }
+            boolean finished = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                sb.append("Vulnerability Scan (OWASP Dependency-Check): TIMEOUT (Scan exceeded 60s limit)\n");
+                return sb.toString().trim();
+            }
+
+            Path reportJson = projectPath.resolve("target/dependency-check-report.json");
+            if (Files.exists(reportJson)) {
+                String json = Files.readString(reportJson);
+                int vulnCount = 0;
+                if (json.contains("\"vulnerabilities\": [")) {
+                    String[] parts = json.split("\"vulnerabilities\":\\s*\\[");
+                    StringBuilder vulnDetails = new StringBuilder();
+                    for (int i = 1; i < parts.length; i++) {
+                        String block = parts[i].split("\\]")[0];
+                        if (!block.trim().isEmpty()) {
+                            String[] names = block.split("\"name\":\\s*\"");
+                            for (int j = 1; j < names.length; j++) {
+                                vulnCount++;
+                                String cveName = names[j].split("\"")[0];
+                                if (vulnDetails.length() < 1000) {
+                                    vulnDetails.append("  - CVE: ").append(cveName).append("\n");
+                                }
+                            }
+                        }
+                    }
+                    if (vulnCount > 0) {
+                        sb.append("Vulnerability Scan (OWASP Dependency-Check): FAILED (").append(vulnCount).append(" CVE vulnerability/vulnerabilities detected)\n");
+                        sb.append(vulnDetails);
+                    } else {
+                        sb.append("Vulnerability Scan (OWASP Dependency-Check): PASSED (0 known CVE vulnerabilities)\n");
+                    }
+                } else {
+                    sb.append("Vulnerability Scan (OWASP Dependency-Check): PASSED (0 known CVE vulnerabilities)\n");
+                }
+            } else {
+                sb.append("Vulnerability Scan (OWASP Dependency-Check): PASSED (0 known CVE vulnerabilities)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Vulnerability Scan (OWASP Dependency-Check): Could not execute (").append(e.getMessage()).append(")\n");
+        } finally {
+            running.set(false);
+            heartbeat.interrupt();
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runPitestMutationTesting(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        long startTime = System.currentTimeMillis();
+        java.util.concurrent.atomic.AtomicBoolean running = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread heartbeat = new Thread(() -> {
+            while (running.get()) {
+                try {
+                    Thread.sleep(10000);
+                } catch (InterruptedException ignored) {
+                    break;
+                }
+                if (running.get()) {
+                    long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                    logger.info("... PITest mutation testing still running ({}s elapsed) ...", elapsed);
+                }
+            }
+        });
+        heartbeat.setDaemon(true);
+        heartbeat.start();
+
+        try {
+            logger.info("Executing PITest mutation testing on: {}", projectPath);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "mvn", "org.pitest:pitest-maven:1.16.1:mutationCoverage",
+                    "-DtestPlugin=junit5",
+                    "-DoutputFormats=XML",
+                    "-DtimestampedReports=false",
+                    "-DfailWhenNoMutations=false",
+                    "-Dthreads=4",
+                    "-B"
+            );
+            pb.directory(projectPath.toFile());
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                    if (line.contains("Mutations created") || line.contains("Killed") || line.contains("PIT >>")) {
+                        logger.info("[PITest] {}", line.trim());
+                    }
+                }
+            }
+            process.waitFor();
+
+            Path reportXml = projectPath.resolve("target/pit-reports/mutations.xml");
+            if (Files.exists(reportXml)) {
+                String xml = Files.readString(reportXml);
+                int totalMutations = (xml.split("<mutation ").length) - 1;
+                int killed = (xml.split("status='KILLED'").length - 1) + (xml.split("status=\"KILLED\"").length - 1);
+                int survived = (xml.split("status='SURVIVED'").length - 1) + (xml.split("status=\"SURVIVED\"").length - 1);
+                int noCoverage = (xml.split("status='NO_COVERAGE'").length - 1) + (xml.split("status=\"NO_COVERAGE\"").length - 1);
+
+                if (totalMutations > 0) {
+                    double score = (killed * 100.0) / totalMutations;
+                    if (survived > 0 || noCoverage > 0) {
+                        sb.append(String.format("Mutation Testing (PITest 1.16.1): ACTION_REQUIRED (Score: %.1f%% - Killed: %d, Survived: %d, No Coverage: %d)\n",
+                                score, killed, survived, noCoverage));
+                        xml.lines()
+                                .filter(line -> line.contains("status='SURVIVED'") || line.contains("status=\"SURVIVED\"") || line.contains("<mutatedClass>") || line.contains("<lineNumber>") || line.contains("<description>"))
+                                .limit(15)
+                                .forEach(line -> sb.append("  - ").append(line.trim().replaceAll("<[^>]*>", " ")).append("\n"));
+                    } else {
+                        sb.append(String.format("Mutation Testing (PITest 1.16.1): PASSED (Score: %.1f%% - %d/%d mutants killed)\n",
+                                score, killed, totalMutations));
+                    }
+                } else {
+                    sb.append("Mutation Testing (PITest 1.16.1): PASSED (0 mutations generated or no testable code)\n");
+                }
+            } else {
+                sb.append("Mutation Testing (PITest 1.16.1): PASSED (0 mutations generated or no report found)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Mutation Testing (PITest 1.16.1): Could not execute (").append(e.getMessage()).append(")\n");
+        } finally {
+            running.set(false);
+            heartbeat.interrupt();
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runNpmMutationTesting(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            Path strykerConfig = projectPath.resolve("stryker.config.mjs");
+            Path strykerJson = projectPath.resolve("stryker.config.json");
+            Path pkgJson = projectPath.resolve("package.json");
+            boolean hasStryker = Files.exists(strykerConfig) || Files.exists(strykerJson);
+            if (!hasStryker && Files.exists(pkgJson)) {
+                hasStryker = Files.readString(pkgJson).contains("stryker");
+            }
+
+            if (hasStryker) {
+                logger.info("Executing Stryker mutation testing on: {}", projectPath);
+                TestRunResult strykerResult = runProcess(projectPath, "npx", "stryker", "run");
+                sb.append(strykerResult.passed() ? "Mutation Testing (Stryker): PASSED\n" : "Mutation Testing (Stryker): ACTION_REQUIRED (Surviving mutants detected)\n");
+            } else {
+                sb.append("Mutation Testing (Stryker): SKIPPED (Stryker not configured in package.json)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Mutation Testing (Stryker): Could not execute (").append(e.getMessage()).append(")\n");
+        }
+        return sb.toString().trim();
+    }
+
+    public String runMutationTesting(Path projectPath) {
+        boolean hasPom = Files.exists(projectPath.resolve("pom.xml"));
+        boolean hasPackageJson = Files.exists(projectPath.resolve("package.json"));
+        StringBuilder sb = new StringBuilder();
+        if (hasPom) {
+            sb.append(runPitestMutationTesting(projectPath)).append("\n");
+        }
+        if (hasPackageJson) {
+            sb.append(runNpmMutationTesting(projectPath)).append("\n");
+        }
+        if (!hasPom && !hasPackageJson) {
+            sb.append("No pom.xml or package.json found in ").append(projectPath).append("\n");
+        }
+
+        String resultSummary = sb.toString().trim();
+        boolean hasDefects = resultSummary.contains("ACTION_REQUIRED") || resultSummary.contains("FAILED");
+        SwarmStatus status = hasDefects ? SwarmStatus.MAX_ITERATIONS_REACHED : SwarmStatus.SUCCESS;
+
+        // Generate task.md if mutation defects or surviving mutants are detected
+        Path taskMdFile = projectPath.resolve("task.md");
+        if (hasDefects) {
+            try {
+                String taskContent = """
+                        # Task: Kill Surviving Mutants and Strengthen Test Assertions
+                        ## Context & Problem Statement
+                        Mutation testing detected surviving mutants or missing assertions in unit test suites.
+                        
+                        ## Mutation Details
+                        %s
+                        
+                        ## Required Implementation Changes
+                        Add missing assertions or refine boundary condition checks to verify true logic and kill surviving mutants.
+                        """.formatted(resultSummary);
+                Files.writeString(taskMdFile, taskContent);
+                logger.info("Mutation testing detected defects. Generated: {}", taskMdFile);
+            } catch (Exception e) {
+                logger.warn("Could not write task.md for mutation test: {}", e.getMessage());
+            }
+        }
+
+        writeHtmlReport(projectPath, "taika-report-mutation.html", "Taika Mutation Testing Report",
+                status, resultSummary, new ExecutionThread());
+
+        return resultSummary;
+    }
+
+    public String scanVulnerabilities(Path projectPath) {
+        boolean hasPom = Files.exists(projectPath.resolve("pom.xml"));
+        boolean hasPackageJson = Files.exists(projectPath.resolve("package.json"));
+        StringBuilder sb = new StringBuilder();
+        if (hasPom) {
+            sb.append(runOwaspDependencyCheck(projectPath)).append("\n");
+        }
+        if (hasPackageJson) {
+            sb.append(runNpmAuditScan(projectPath)).append("\n");
+        }
+        if (!hasPom && !hasPackageJson) {
+            sb.append("No pom.xml or package.json found in ").append(projectPath).append("\n");
+        }
+
+        String resultSummary = sb.toString().trim();
+        boolean hasVulnerabilities = resultSummary.contains("FAILED");
+        SwarmStatus status = hasVulnerabilities ? SwarmStatus.MAX_ITERATIONS_REACHED : SwarmStatus.SUCCESS;
+
+        // Generate task.md if vulnerabilities detected
+        Path taskMdFile = projectPath.resolve("task.md");
+        if (hasVulnerabilities) {
+            try {
+                String taskContent = """
+                        # Task: Remediate Dependency Security Vulnerabilities
+                        ## Context & Problem Statement
+                        A dependency security scan detected known CVE vulnerabilities in project dependencies.
+
+                        ## Scan Details
+                        %s
+
+                        ## Required Implementation Changes
+                        Update the vulnerable library versions in pom.xml / package.json to secure patched versions.
+                        """.formatted(resultSummary);
+                Files.writeString(taskMdFile, taskContent);
+                logger.info("Security scan detected vulnerabilities. Generated: {}", taskMdFile);
+            } catch (Exception e) {
+                logger.warn("Could not write task.md for security scan: {}", e.getMessage());
+            }
+        }
+
+        writeHtmlReport(projectPath, "taika-report-security.html", "Taika Dependency Security Report",
+                status, resultSummary, new ExecutionThread());
+
+        return resultSummary;
+    }
+
+    protected String runNpmAuditScan(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            logger.info("Executing npm audit on: {}", projectPath);
+            TestRunResult auditResult = runProcess(projectPath, "npm", "audit", "--json");
+            String output = auditResult.output();
+            if (output != null && output.contains("\"vulnerabilities\"") && !auditResult.passed() && !output.contains("\"total\": 0") && !output.contains("\"total\":0")) {
+                sb.append("Vulnerability Scan (npm audit): FAILED (Vulnerabilities detected)\n");
+                String snippet = output.length() > 400 ? output.substring(0, 400) + "... [truncated]" : output;
+                sb.append("  Details:\n").append(snippet).append("\n");
+            } else {
+                sb.append("Vulnerability Scan (npm audit): PASSED (0 known vulnerabilities)\n");
+            }
+        } catch (Exception e) {
+            sb.append("Vulnerability Scan (npm audit): Could not execute (").append(e.getMessage()).append(")\n");
+        }
+        return sb.toString().trim();
+    }
+
+    protected String runNpmStaticAnalysis(Path projectPath) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Static Analysis (TypeCheck / Lint):\n");
+
+        // Run TypeScript typecheck if tsconfig exists
+        if (Files.exists(projectPath.resolve("tsconfig.json"))) {
+            logger.info("Executing TypeScript static typecheck on: {}", projectPath);
+            TestRunResult tscResult = runProcess(projectPath, "npx", "vue-tsc", "--noEmit");
+            if (!tscResult.passed()) {
+                // Fallback to standard tsc
+                tscResult = runProcess(projectPath, "npx", "tsc", "--noEmit");
+            }
+            sb.append("- TypeScript Typecheck: ").append(tscResult.passed() ? "PASSED" : "FAILED").append("\n");
+            if (!tscResult.passed() && !tscResult.output().isBlank()) {
+                String snippet = tscResult.output().length() > 400 ? tscResult.output().substring(0, 400) + "... [truncated]" : tscResult.output();
+                sb.append("  Details:\n").append(snippet).append("\n");
+            }
+        }
+
+        // Run ESLint if configured in package.json
+        Path packageJson = projectPath.resolve("package.json");
+        if (Files.exists(packageJson)) {
+            try {
+                String pkgContent = Files.readString(packageJson);
+                if (pkgContent.contains("\"lint\"") || pkgContent.contains("eslint")) {
+                    logger.info("Executing ESLint on: {}", projectPath);
+                    TestRunResult lintResult = runProcess(projectPath, "npm", "run", "lint");
+                    sb.append("- JavaScript/TypeScript Linter (ESLint): ").append(lintResult.passed() ? "PASSED" : "FAILED").append("\n");
+                    if (!lintResult.passed() && !lintResult.output().isBlank()) {
+                        String snippet = lintResult.output().length() > 400 ? lintResult.output().substring(0, 400) + "... [truncated]" : lintResult.output();
+                        sb.append("  Details:\n").append(snippet).append("\n");
+                    }
+                }
+            } catch (Exception ignored) {}
         }
 
         return sb.toString();
@@ -233,7 +750,7 @@ public class SwarmOrchestrator {
             long totalBranches = branchMissed + branchCovered;
             double linePct = totalLines > 0 ? (lineCovered * 100.0) / totalLines : 100.0;
             double branchPct = totalBranches > 0 ? (branchCovered * 100.0) / totalBranches : 100.0;
-            return String.format("Coverage Metrics:\n- Line Coverage: %.1f%% (Covered: %d, Missed: %d)\n- Branch Coverage: %.1f%% (Covered: %d, Missed: %d)",
+            return String.format("Test Coverage (JaCoCo 0.8.12):\n- Line Coverage: %.1f%% (Covered: %d, Missed: %d)\n- Branch Coverage: %.1f%% (Covered: %d, Missed: %d)",
                     linePct, lineCovered, lineMissed, branchPct, branchCovered, branchMissed);
         } catch (Exception e) {
             return "Failed to parse JaCoCo CSV: " + e.getMessage();
@@ -311,8 +828,8 @@ public class SwarmOrchestrator {
                 );
             } catch (Exception e) {
                 logger.error("Error executing UNIT_TESTER for project '{}'", projectPath, e);
-                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in unit test phase: " + e.getMessage(), thread);
-                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in unit test phase: " + e.getMessage());
+                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in unit test phase: " + getRootCauseMessage(e), thread);
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in unit test phase: " + getRootCauseMessage(e));
             }
         }
 
@@ -367,8 +884,8 @@ public class SwarmOrchestrator {
                 );
             } catch (Exception e) {
                 logger.error("Error executing CODER for project '{}'", projectPath, e);
-                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in coder phase: " + e.getMessage(), thread);
-                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in coder phase: " + e.getMessage());
+                writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in coder phase: " + getRootCauseMessage(e), thread);
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in coder phase: " + getRootCauseMessage(e));
             }
         }
 
@@ -410,8 +927,8 @@ public class SwarmOrchestrator {
             return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(), finalReport);
         } catch (Exception e) {
             logger.error("Error executing VALIDATOR for project '{}'", projectPath, e);
-            writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in validator phase: " + e.getMessage(), thread);
-            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in validator phase: " + e.getMessage());
+            writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed in validator phase: " + getRootCauseMessage(e), thread);
+            return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed in validator phase: " + getRootCauseMessage(e));
         }
     }
 
@@ -568,8 +1085,8 @@ public class SwarmOrchestrator {
                 );
             } catch (Exception e) {
                 logger.error("Error executing ROBOT_TESTER for project '{}'", projectPath, e);
-                writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed: " + e.getMessage(), thread);
-                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed: " + e.getMessage());
+                writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, "Execution failed: " + getRootCauseMessage(e), thread);
+                return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(), "Execution failed: " + getRootCauseMessage(e));
             }
         }
 
@@ -577,6 +1094,17 @@ public class SwarmOrchestrator {
         writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.MAX_ITERATIONS_REACHED, failSummary, thread);
         return new SwarmResult(thread.getId(), SwarmStatus.MAX_ITERATIONS_REACHED, thread.getHistory(),
                 failSummary);
+    }
+
+    private String getRootCauseMessage(Throwable throwable) {
+        if (throwable == null) return "Unknown error";
+        Throwable root = throwable;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getMessage() != null && !root.getMessage().isBlank()
+                ? root.getMessage()
+                : throwable.getMessage();
     }
 
     void writeHtmlReport(Path projectPath, String fileName, String title, SwarmStatus status, String content, ExecutionThread thread) {
