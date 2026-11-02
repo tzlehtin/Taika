@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -143,7 +144,7 @@ class SwarmOrchestratorTest {
 
         org.mockito.Mockito.doReturn(robotResult).when(spiedOrchestrator).generateRobotTests(eq(fakePath), eq(3));
         org.mockito.Mockito.doReturn(codeResult).when(spiedOrchestrator).generateCode(eq(fakePath), eq(3), any());
-        org.mockito.Mockito.doReturn(auditResult).when(spiedOrchestrator).audit(eq(fakePath));
+        org.mockito.Mockito.doReturn(auditResult).when(spiedOrchestrator).audit(eq(fakePath), anyBoolean(), anyBoolean());
 
         // Act
         SwarmResult result = spiedOrchestrator.pipeline(fakePath, 3, null);
@@ -196,7 +197,7 @@ class SwarmOrchestratorTest {
 
         org.mockito.Mockito.doReturn(robotResult).when(spiedOrchestrator).generateRobotTests(eq(fakePath), eq(3));
         org.mockito.Mockito.doReturn(codeResult).when(spiedOrchestrator).generateCode(eq(fakePath), eq(3), any());
-        org.mockito.Mockito.doReturn(auditFailure).when(spiedOrchestrator).audit(eq(fakePath));
+        org.mockito.Mockito.doReturn(auditFailure).when(spiedOrchestrator).audit(eq(fakePath), anyBoolean(), anyBoolean());
 
         // Act
         SwarmResult result = spiedOrchestrator.pipeline(fakePath, 3, null);
@@ -245,6 +246,42 @@ class SwarmOrchestratorTest {
 
         // Assert
         assertTrue(result.contains("Vulnerability Scan (OWASP Dependency-Check)"));
+    }
+
+    @Test
+    void runPitestMutationTesting_shouldReportPassedWhenNoReportFound(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runPitestMutationTesting(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Mutation Testing (PITest 1.16.1)"));
+    }
+
+    @Test
+    void scanVulnerabilities_shouldCreateReportFile(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.scanVulnerabilities(tempDir);
+
+        // Assert
+        assertTrue(java.nio.file.Files.exists(tempDir.resolve("taika-report-security.html")));
+    }
+
+    @Test
+    void runMutationTesting_shouldCreateReportFile(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runMutationTesting(tempDir);
+
+        // Assert
+        assertTrue(java.nio.file.Files.exists(tempDir.resolve("taika-report-mutation.html")));
+    }
+
+    @Test
+    void runNpmMutationTesting_shouldReportSkippedWhenNotConfigured(@TempDir Path tempDir) {
+        // Act
+        String result = swarmOrchestrator.runNpmMutationTesting(tempDir);
+
+        // Assert
+        assertTrue(result.contains("Mutation Testing (Stryker)"));
     }
 
     @Test

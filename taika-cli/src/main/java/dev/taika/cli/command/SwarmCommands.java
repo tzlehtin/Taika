@@ -87,19 +87,27 @@ public class SwarmCommands {
     }
 
     public String audit(String path, String maxLoops) {
-        return audit(path, maxLoops, false);
+        return audit(path, maxLoops, false, false);
+    }
+
+    public String audit(String path, String maxLoops, boolean scanVulnerabilities) {
+        return audit(path, maxLoops, scanVulnerabilities, false);
     }
 
     @ShellMethod(key = "audit", value = "Performs deep architectural, code quality, and test effectiveness audit, generating taika-report-audit.html and task.md.")
     public String audit(
             @ShellOption(value = {"--path", "-p"}, arity = 1, help = "The absolute or relative path to the root directory of the project.") String path,
             @ShellOption(value = {"--max-loops", "-m"}, defaultValue = ShellOption.NULL, help = "Optional max loops (ignored in audit).") String maxLoops,
-            @ShellOption(value = {"--scan-vulnerabilities", "--security", "-s"}, defaultValue = "false", help = "Include deep dependency vulnerability scanning (OWASP / npm audit).") boolean scanVulnerabilities
+            @ShellOption(value = {"--scan-vulnerabilities", "--security", "-s"}, defaultValue = "false", help = "Include deep dependency vulnerability scanning (OWASP / npm audit).") boolean scanVulnerabilities,
+            @ShellOption(value = {"--mutation", "-u"}, defaultValue = "false", help = "Include mutation testing (PITest / Stryker) to detect fake assertions.") boolean runMutation
     ) {
         System.out.println("Starting Taika Project Audit:");
         System.out.println("Project Path: " + path);
         if (scanVulnerabilities) {
             System.out.println("Security Scan: ENABLED (OWASP Dependency-Check / npm audit active)");
+        }
+        if (runMutation) {
+            System.out.println("Mutation Testing: ENABLED (PITest / Stryker active)");
         }
         System.out.println("-------------------------------------------------");
 
@@ -113,8 +121,8 @@ public class SwarmCommands {
                 return "Error: The specified path is not a directory: " + projectPath;
             }
 
-            SwarmResult result = scanVulnerabilities
-                    ? swarmOrchestrator.audit(projectPath, true)
+            SwarmResult result = (scanVulnerabilities || runMutation)
+                    ? swarmOrchestrator.audit(projectPath, scanVulnerabilities, runMutation)
                     : swarmOrchestrator.audit(projectPath);
             return String.format("\nAudit Complete!\nStatus: %s\nReport File: %s\nTask File: %s\nSummary:\n%s",
                     result.status(),
@@ -155,7 +163,11 @@ public class SwarmCommands {
     }
 
     public String pipeline(String path, int maxLoops, String objective) {
-        return pipeline(path, maxLoops, objective, false);
+        return pipeline(path, maxLoops, objective, false, false);
+    }
+
+    public String pipeline(String path, int maxLoops, String objective, boolean scanVulnerabilities) {
+        return pipeline(path, maxLoops, objective, scanVulnerabilities, false);
     }
 
     @ShellMethod(key = {"pipeline", "flow", "auto"}, value = "Executes the full automated workflow: gen-robots -> gen-code -> audit in sequence.")
@@ -163,7 +175,8 @@ public class SwarmCommands {
             @ShellOption(value = {"--path", "-p"}, arity = 1, help = "The absolute or relative path to the root directory of the project.") String path,
             @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "8", help = "Maximum iterations per phase.") int maxLoops,
             @ShellOption(value = {"--objective", "-o"}, defaultValue = ShellOption.NULL, help = "Optional custom objective or feature request.") String objective,
-            @ShellOption(value = {"--scan-vulnerabilities", "--security", "-s"}, defaultValue = "false", help = "Include deep dependency vulnerability scanning (OWASP / npm audit).") boolean scanVulnerabilities
+            @ShellOption(value = {"--scan-vulnerabilities", "--security", "-s"}, defaultValue = "false", help = "Include deep dependency vulnerability scanning (OWASP / npm audit).") boolean scanVulnerabilities,
+            @ShellOption(value = {"--mutation", "-u"}, defaultValue = "false", help = "Include mutation testing (PITest / Stryker) in audit phase.") boolean runMutation
     ) {
         System.out.println("Starting Automated Taika Pipeline (gen-robots -> gen-code -> audit):");
         System.out.println("Project Path: " + path);
@@ -178,6 +191,9 @@ public class SwarmCommands {
         if (scanVulnerabilities) {
             System.out.println("Security Scan: ENABLED (OWASP / npm audit active in audit phase)");
         }
+        if (runMutation) {
+            System.out.println("Mutation Testing: ENABLED (PITest / Stryker active in audit phase)");
+        }
         System.out.println("-------------------------------------------------");
 
         try {
@@ -190,8 +206,8 @@ public class SwarmCommands {
                 return "Error: The specified path is not a directory: " + projectPath;
             }
 
-            SwarmResult result = scanVulnerabilities
-                    ? swarmOrchestrator.pipeline(projectPath, maxLoops, objective, true)
+            SwarmResult result = (scanVulnerabilities || runMutation)
+                    ? swarmOrchestrator.pipeline(projectPath, maxLoops, objective, scanVulnerabilities, runMutation)
                     : swarmOrchestrator.pipeline(projectPath, maxLoops, objective);
             return String.format("\nPipeline Complete!\nStatus: %s\nSummary:\n%s",
                     result.status(), result.finalSummary());
@@ -219,9 +235,44 @@ public class SwarmCommands {
             }
 
             String result = swarmOrchestrator.scanVulnerabilities(projectPath);
-            return "\nSecurity Scan Complete!\n\n" + result;
+            Path taskFile = projectPath.resolve("task.md");
+            String taskNotice = Files.exists(taskFile) ? "\nTask File: " + taskFile : "";
+            return String.format("\nSecurity Scan Complete!\nReport File: %s%s\n\n%s",
+                    projectPath.resolve("taika-report-security.html"),
+                    taskNotice,
+                    result);
         } catch (Exception e) {
             return "An unexpected error occurred during security scan: " + e.getMessage();
+        }
+    }
+
+    @ShellMethod(key = {"mutation-test", "pitest"}, value = "Performs mutation testing using PITest (Java) or Stryker (Vue) to challenge test effectiveness.")
+    public String mutationTest(
+            @ShellOption(value = {"--path", "-p"}, arity = 1, help = "The absolute or relative path to the root directory of the project.") String path
+    ) {
+        System.out.println("Starting Taika Mutation Testing (PITest / Stryker):");
+        System.out.println("Project Path: " + path);
+        System.out.println("-------------------------------------------------");
+
+        try {
+            Path projectPath = Path.of(path).toAbsolutePath().normalize();
+
+            if (!Files.exists(projectPath)) {
+                return "Error: The specified path does not exist: " + projectPath;
+            }
+            if (!Files.isDirectory(projectPath)) {
+                return "Error: The specified path is not a directory: " + projectPath;
+            }
+
+            String result = swarmOrchestrator.runMutationTesting(projectPath);
+            Path taskFile = projectPath.resolve("task.md");
+            String taskNotice = Files.exists(taskFile) ? "\nTask File: " + taskFile : "";
+            return String.format("\nMutation Testing Complete!\nReport File: %s%s\n\n%s",
+                    projectPath.resolve("taika-report-mutation.html"),
+                    taskNotice,
+                    result);
+        } catch (Exception e) {
+            return "An unexpected error occurred during mutation testing: " + e.getMessage();
         }
     }
 }

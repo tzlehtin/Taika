@@ -190,6 +190,9 @@ public class AgentService {
                 5. DEPENDENCY VULNERABILITY AUDIT (OWASP / npm audit):
                    - Inspect the vulnerability scan results in the diagnostics.
                    - If CVE or dependency vulnerabilities are reported (FAILED), list the vulnerabilities and require updating the vulnerable dependency versions in `task.md`.
+                6. MUTATION TESTING AUDIT (PITest / Stryker):
+                   - Inspect mutation testing results in diagnostics if present.
+                   - If surviving mutants or ACTION_REQUIRED is reported (low mutation score or surviving mutants), identify untested logic or fake assertions and demand tests with strict assertions to kill surviving mutants in `task.md`.
 
                 AUDITOR ROLE BOUNDARY MANDATE:
                 - You are an AUDITOR, NOT A CODER.
@@ -197,7 +200,7 @@ public class AgentService {
                 - You may ONLY use the `fileSystemWriter` tool to create `task.md` in the project root directory when ACTION_REQUIRED.
 
                 FILE READING RESTRICTION:
-                - NEVER invoke fileSystemReader on the entire project root or 'node_modules/' or 'target/'.
+                - NEVER invoke fileSystemReader on the entire project root or 'node_modules/' or 'target/'. Reading compiled .class files causes Charset exceptions.
                 - Inspect only specific source files (e.g. src/, tests/, robots/, package.json, pom.xml) using fileReader.
                 - Avoid generating complex JSDOM CLI wrapper scripts in tests/ if simple node-based execution or declarative component checks are sufficient.
 
@@ -343,6 +346,9 @@ public class AgentService {
                 You are a world-class software engineering assistant. Your task is to perform the requested action on the provided code context.
                 You must use the available tools to read and write files, and to compile and test the code.
                 Think step-by-step and explain your reasoning. When your task requires creating or modifying a file, you MUST use the `fileSystemWriter` tool.
+                CRITICAL FILE READING RULE:
+                - NEVER call fileSystemReader on directories containing binary files (such as target/, build/, node_modules/, or .git/).
+                - Only read source text files (.java, .xml, .md, .robot, .ts, .vue, .json).
                 Do NOT output file contents in your response. Your final response should only be a brief confirmation of the action you took.
                 
                 IMPORTANT MAVEN RULE: If you create a pom.xml for a new executable application, you MUST configure the `maven-jar-plugin` to define the main class.

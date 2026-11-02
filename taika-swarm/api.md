@@ -29,6 +29,15 @@ The primary service used by external modules (like `taika-cli`) to start and mon
     * **Input:**
         * `projectPath` (Path): The target project directory.
         * `scanVulnerabilities` (boolean): Whether to run deep CVE vulnerability checks (OWASP Dependency-Check / npm audit).
+* **Method:** `public SwarmResult audit(Path projectPath, boolean scanVulnerabilities, boolean runMutation)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory.
+        * `scanVulnerabilities` (boolean): Whether to run deep CVE vulnerability checks.
+        * `runMutation` (boolean): Whether to run mutation testing (PITest / Stryker).
+* **Method:** `public String runMutationTesting(Path projectPath)`
+    * **Input:**
+        * `projectPath` (Path): The target project directory.
+    * **Output:** Formatted PITest or Stryker mutation testing results and mutation score.
 * **Method:** `public String scanVulnerabilities(Path projectPath)`
     * **Input:**
         * `projectPath` (Path): The target project directory.
