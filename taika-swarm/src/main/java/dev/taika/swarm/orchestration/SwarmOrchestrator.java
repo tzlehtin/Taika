@@ -26,8 +26,8 @@ public class SwarmOrchestrator {
 
     private static final Logger logger = LoggerFactory.getLogger(SwarmOrchestrator.class);
     private static final int MAX_ITERATIONS = 10; // To prevent infinite loops
-    private static final int DEFAULT_MAX_ROBOT_LOOPS = 8;
-    private static final int DEFAULT_MAX_CODE_LOOPS = 8;
+    private static final int DEFAULT_MAX_ROBOT_LOOPS = 3;
+    private static final int DEFAULT_MAX_CODE_LOOPS = 3;
 
     private final AgentService agentService;
 
@@ -79,8 +79,14 @@ public class SwarmOrchestrator {
         SwarmResult robotResult = generateRobotTests(projectPath, maxLoops);
         if (robotResult.status() != SwarmStatus.SUCCESS) {
             logger.warn("Pipeline halted at step 1 (gen-robots). Status: {}", robotResult.status());
-            return new SwarmResult(robotResult.threadId(), robotResult.status(), robotResult.invocationHistory(),
-                    "Pipeline halted at Step 1 (gen-robots):\n" + robotResult.finalSummary());
+            long totalPromptTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+            long totalGenTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+            long totalTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+            String summary = String.format(
+                    "Pipeline halted at Step 1 (gen-robots):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d",
+                    robotResult.finalSummary(), totalPromptTokens, totalGenTokens, totalTokens
+            );
+            return new SwarmResult(robotResult.threadId(), robotResult.status(), robotResult.invocationHistory(), summary);
         }
 
         // Step 2: gen-code
@@ -88,8 +94,17 @@ public class SwarmOrchestrator {
         SwarmResult codeResult = generateCode(projectPath, maxLoops, objective);
         if (codeResult.status() != SwarmStatus.SUCCESS) {
             logger.warn("Pipeline halted at step 2 (gen-code). Status: {}", codeResult.status());
-            return new SwarmResult(codeResult.threadId(), codeResult.status(), codeResult.invocationHistory(),
-                    "Pipeline halted at Step 2 (gen-code):\n" + codeResult.finalSummary());
+            List<AgentInvocationLog> combinedHistory = Stream.of(robotResult, codeResult)
+                    .flatMap(r -> r.invocationHistory().stream())
+                    .toList();
+            long totalPromptTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+            long totalGenTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+            long totalTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+            String summary = String.format(
+                    "Pipeline halted at Step 2 (gen-code):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d",
+                    codeResult.finalSummary(), totalPromptTokens, totalGenTokens, totalTokens
+            );
+            return new SwarmResult(codeResult.threadId(), codeResult.status(), combinedHistory, summary);
         }
 
         // Step 3: audit
@@ -97,14 +112,23 @@ public class SwarmOrchestrator {
         SwarmResult auditResult = audit(projectPath, scanVulnerabilities, runMutation);
         SwarmStatus overallStatus = auditResult.status();
 
+        List<AgentInvocationLog> combinedHistory = Stream.of(robotResult, codeResult, auditResult)
+                .flatMap(r -> r.invocationHistory().stream())
+                .toList();
+        long totalPromptTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+        long totalGenTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+        long totalTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+
         String combinedSummary = String.format(
                 "Pipeline Execution Complete (gen-robots -> gen-code -> audit)!\n\n" +
                 "--- Step 1: Robot Tests ---\nStatus: %s\n\n" +
                 "--- Step 2: Code Generation ---\nStatus: %s\n\n" +
-                "--- Step 3: Audit Result ---\n%s",
-                robotResult.status(), codeResult.status(), auditResult.finalSummary()
+                "--- Step 3: Audit Result ---\n%s\n\n" +
+                "=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d",
+                robotResult.status(), codeResult.status(), auditResult.finalSummary(),
+                totalPromptTokens, totalGenTokens, totalTokens
         );
-        return new SwarmResult(auditResult.threadId(), overallStatus, auditResult.invocationHistory(), combinedSummary);
+        return new SwarmResult(auditResult.threadId(), overallStatus, combinedHistory, combinedSummary);
     }
 
     /**
@@ -144,7 +168,7 @@ public class SwarmOrchestrator {
 
         try {
             AgentResult auditResult = agentService.executeTask(projectPath, AgentType.AUDITOR, auditTask);
-            thread.log(new AgentInvocationLog(AgentType.AUDITOR, auditResult.status()));
+            thread.log(new AgentInvocationLog(AgentType.AUDITOR, auditResult.status(), auditResult.promptTokens(), auditResult.generationTokens(), auditResult.totalTokens()));
 
             Path taskMdFile = projectPath.resolve("task.md");
             boolean auditPassed = auditResult.executionLog() != null && auditResult.executionLog().contains("AUDIT STATUS: PASSED");
@@ -167,7 +191,8 @@ public class SwarmOrchestrator {
             
             SwarmStatus auditStatus = Files.exists(taskMdFile) ? SwarmStatus.MAX_ITERATIONS_REACHED : SwarmStatus.SUCCESS;
 
-            String summary = "Project Audit Complete!\n" + taskMdNotice + "\n\n=== Diagnostics ===\n" + diagnostics + "\n\n=== Audit Findings ===\n" + auditResult.executionLog();
+            String summary = String.format("Project Audit Complete!\n%s\n\n=== Diagnostics ===\n%s\n\n=== Token Usage ===\nPrompt: %,d | Generation: %,d | Total: %,d\n\n=== Audit Findings ===\n%s",
+                    taskMdNotice, diagnostics, thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalTokens(), auditResult.executionLog());
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", auditStatus, summary, thread);
 
             return new SwarmResult(thread.getId(), auditStatus, thread.getHistory(), summary);
@@ -795,7 +820,7 @@ public class SwarmOrchestrator {
             logger.info("Unit test generation iteration {}/{}", loop, maxLoops);
             try {
                 AgentResult result = agentService.executeTask(projectPath, AgentType.UNIT_TESTER, unitTestTask);
-                thread.log(new AgentInvocationLog(AgentType.UNIT_TESTER, result.status()));
+                thread.log(new AgentInvocationLog(AgentType.UNIT_TESTER, result.status(), result.promptTokens(), result.generationTokens(), result.totalTokens()));
 
                 if (!"SUCCESS".equalsIgnoreCase(result.status())) {
                     unitTestTask = "The previous unit test generation attempt failed: " + result.summary() + "\nPlease generate valid tests and dummy stubs.";
@@ -859,7 +884,7 @@ public class SwarmOrchestrator {
             logger.info("Production code implementation iteration {}/{}", loop, maxLoops);
             try {
                 AgentResult result = agentService.executeTask(projectPath, AgentType.CODER, coderTask);
-                thread.log(new AgentInvocationLog(AgentType.CODER, result.status()));
+                thread.log(new AgentInvocationLog(AgentType.CODER, result.status(), result.promptTokens(), result.generationTokens(), result.totalTokens()));
 
                 if (!"SUCCESS".equalsIgnoreCase(result.status())) {
                     coderTask = "The previous implementation attempt failed: " + result.summary() + "\nPlease complete the implementation.";
@@ -912,14 +937,15 @@ public class SwarmOrchestrator {
 
         try {
             AgentResult valResult = agentService.executeTask(projectPath, AgentType.VALIDATOR, validatorTask);
-            thread.log(new AgentInvocationLog(AgentType.VALIDATOR, valResult.status()));
+            thread.log(new AgentInvocationLog(AgentType.VALIDATOR, valResult.status(), valResult.promptTokens(), valResult.generationTokens(), valResult.totalTokens()));
 
             String finalReport = String.format(
                     "Code Generation Complete!\n\n" +
+                    "=== Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d\n\n" +
                     "=== Test Suite Report ===\n%s\n\n" +
                     "=== Implementation Summary ===\n%s\n\n" +
                     "=== Quality & Verification Report ===\n%s",
-                    testReport, coderSummary, valResult.executionLog()
+                    thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalTokens(), testReport, coderSummary, valResult.executionLog()
             );
 
             writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.SUCCESS, finalReport, thread);
@@ -1059,7 +1085,7 @@ public class SwarmOrchestrator {
             logger.info("Robot test generation iteration {}/{}", loop, maxLoops);
             try {
                 AgentResult result = agentService.executeTask(projectPath, AgentType.ROBOT_TESTER, taskDescription);
-                thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status()));
+                thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status(), result.promptTokens(), result.generationTokens(), result.totalTokens()));
 
                 if (!"SUCCESS".equalsIgnoreCase(result.status())) {
                     taskDescription = "The previous generation attempt failed: " + result.summary() + "\nPlease generate valid Robot Framework test files.";
@@ -1070,7 +1096,8 @@ public class SwarmOrchestrator {
                 DryRunResult dryRunResult = executeRobotDryRun(projectPath);
                 if (dryRunResult.passed()) {
                     logger.info("Robot test suite passed dry-run validation on iteration {}", loop);
-                    String reportSummary = String.format("Robot tests generated and verified with dry-run in %d iteration(s):\n%s", loop, result.executionLog());
+                    String reportSummary = String.format("Robot tests generated and verified with dry-run in %d iteration(s):\n\nToken Usage: Prompt: %,d | Generation: %,d | Total: %,d\n\n%s",
+                            loop, thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalTokens(), result.executionLog());
                     writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.SUCCESS, reportSummary, thread);
                     return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(),
                             reportSummary);
@@ -1119,10 +1146,17 @@ public class SwarmOrchestrator {
 
             StringBuilder historyHtml = new StringBuilder();
             int historyCount = 0;
+            long totalPrompt = 0L;
+            long totalGen = 0L;
+            long totalTok = 0L;
             if (thread != null && thread.getHistory() != null) {
                 historyCount = thread.getHistory().size();
+                totalPrompt = thread.getTotalPromptTokens();
+                totalGen = thread.getTotalGenerationTokens();
+                totalTok = thread.getTotalTokens();
                 for (AgentInvocationLog log : thread.getHistory()) {
-                    historyHtml.append(String.format("<li><strong>%s</strong>: %s</li>", log.type(), log.status()));
+                    historyHtml.append(String.format("<li><strong>%s</strong>: %s (Tokens: %,d total | %,d prompt / %,d gen)</li>",
+                            log.type(), log.status(), log.totalTokens(), log.promptTokens(), log.generationTokens()));
                 }
             }
             if (historyHtml.isEmpty()) {
@@ -1136,13 +1170,16 @@ public class SwarmOrchestrator {
                             <span class="timestamp">Execution Time: %s</span>
                             <span class="badge" style="background: %s;">%s</span>
                         </div>
+                        <div class="token-summary" style="background: #e2e8f0; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600;">
+                            Cumulative Phase Tokens: %,d (Prompt: %,d | Generation: %,d)
+                        </div>
                         <div class="history">
                             <strong>Agent Invocation Steps (%d):</strong>
                             <ul>%s</ul>
                         </div>
                         <div class="content">%s</div>
                     </div>
-                    """, timestamp, statusColor, status, historyCount, historyHtml, sanitizedContent);
+                    """, timestamp, statusColor, status, totalTok, totalPrompt, totalGen, historyCount, historyHtml, sanitizedContent);
 
             String placeholder = "<!-- RUN_ENTRIES_PLACEHOLDER -->";
             String html;

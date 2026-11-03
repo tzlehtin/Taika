@@ -108,7 +108,7 @@ mvn clean install
 ### All-in-One Command (`pipeline`)
 To run the entire automated development cycle (`gen-robots` -> `gen-code` -> `audit`) with a single command:
 ```bash
-java -jar taika-cli/target/taika-cli-0.8.0.jar pipeline --path /path/to/project --max-loops 3
+java -jar taika-cli/target/taika-cli-0.9.0-SNAPSHOT.jar pipeline --path /path/to/project --max-loops 3
 ```
 To also include deep security checks and mutation testing in the audit phase:
 ```bash
