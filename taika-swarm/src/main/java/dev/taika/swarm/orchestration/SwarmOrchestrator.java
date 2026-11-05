@@ -82,9 +82,10 @@ public class SwarmOrchestrator {
             long totalPromptTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::promptTokens).sum();
             long totalGenTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::generationTokens).sum();
             long totalTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+            long totalReasoningTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
             String summary = String.format(
-                    "Pipeline halted at Step 1 (gen-robots):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d",
-                    robotResult.finalSummary(), totalPromptTokens, totalGenTokens, totalTokens
+                    "Pipeline halted at Step 1 (gen-robots):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Reasoning Tokens: %,d | Total Tokens: %,d",
+                    robotResult.finalSummary(), totalPromptTokens, totalGenTokens, totalReasoningTokens, totalTokens
             );
             return new SwarmResult(robotResult.threadId(), robotResult.status(), robotResult.invocationHistory(), summary);
         }
@@ -100,9 +101,10 @@ public class SwarmOrchestrator {
             long totalPromptTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
             long totalGenTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
             long totalTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+            long totalReasoningTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
             String summary = String.format(
-                    "Pipeline halted at Step 2 (gen-code):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d",
-                    codeResult.finalSummary(), totalPromptTokens, totalGenTokens, totalTokens
+                    "Pipeline halted at Step 2 (gen-code):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Reasoning Tokens: %,d | Total Tokens: %,d",
+                    codeResult.finalSummary(), totalPromptTokens, totalGenTokens, totalReasoningTokens, totalTokens
             );
             return new SwarmResult(codeResult.threadId(), codeResult.status(), combinedHistory, summary);
         }
@@ -118,15 +120,16 @@ public class SwarmOrchestrator {
         long totalPromptTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
         long totalGenTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
         long totalTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+        long totalReasoningTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
 
         String combinedSummary = String.format(
                 "Pipeline Execution Complete (gen-robots -> gen-code -> audit)!\n\n" +
                 "--- Step 1: Robot Tests ---\nStatus: %s\n\n" +
                 "--- Step 2: Code Generation ---\nStatus: %s\n\n" +
                 "--- Step 3: Audit Result ---\n%s\n\n" +
-                "=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d",
+                "=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Reasoning Tokens: %,d | Total Tokens: %,d",
                 robotResult.status(), codeResult.status(), auditResult.finalSummary(),
-                totalPromptTokens, totalGenTokens, totalTokens
+                totalPromptTokens, totalGenTokens, totalReasoningTokens, totalTokens
         );
         return new SwarmResult(auditResult.threadId(), overallStatus, combinedHistory, combinedSummary);
     }
@@ -191,8 +194,8 @@ public class SwarmOrchestrator {
             
             SwarmStatus auditStatus = Files.exists(taskMdFile) ? SwarmStatus.MAX_ITERATIONS_REACHED : SwarmStatus.SUCCESS;
 
-            String summary = String.format("Project Audit Complete!\n%s\n\n=== Diagnostics ===\n%s\n\n=== Token Usage ===\nPrompt: %,d | Generation: %,d | Total: %,d\n\n=== Audit Findings ===\n%s",
-                    taskMdNotice, diagnostics, thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalTokens(), auditResult.executionLog());
+            String summary = String.format("Project Audit Complete!\n%s\n\n=== Diagnostics ===\n%s\n\n=== Token Usage ===\nPrompt: %,d | Generation: %,d | Reasoning: %,d | Total: %,d\n\n=== Audit Findings ===\n%s",
+                    taskMdNotice, diagnostics, thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalReasoningTokens(), thread.getTotalTokens(), auditResult.executionLog());
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", auditStatus, summary, thread);
 
             return new SwarmResult(thread.getId(), auditStatus, thread.getHistory(), summary);
@@ -378,14 +381,9 @@ public class SwarmOrchestrator {
             Path checkstyleXml = projectPath.resolve("target/checkstyle-result.xml");
             if (Files.exists(checkstyleXml)) {
                 String xml = Files.readString(checkstyleXml);
-                List<String> errorLines = xml.lines()
+                List<String> relevantErrors = xml.lines()
                         .filter(line -> line.contains("<error "))
                         .toList();
-                // Filter out non-functional Javadoc noise if default rules are used
-                List<String> relevantErrors = errorLines.stream()
-                        .filter(line -> !line.contains("MissingJavadoc") && !line.contains("JavadocVariable"))
-                        .toList();
-
                 int violationCount = relevantErrors.size();
                 if (violationCount > 0) {
                     sb.append("Java Linter (Checkstyle 3.4.0): FAILED (").append(violationCount).append(" violation(s) found)\n");
@@ -569,10 +567,10 @@ public class SwarmOrchestrator {
                                 score, killed, totalMutations));
                     }
                 } else {
-                    sb.append("Mutation Testing (PITest 1.16.1): PASSED (0 mutations generated or no testable code)\n");
+                    sb.append("Mutation Testing (PITest 1.16.1): SKIPPED (0 mutations generated or no testable code)\n");
                 }
             } else {
-                sb.append("Mutation Testing (PITest 1.16.1): PASSED (0 mutations generated or no report found)\n");
+                sb.append("Mutation Testing (PITest 1.16.1): SKIPPED (No mutation report generated)\n");
             }
         } catch (Exception e) {
             sb.append("Mutation Testing (PITest 1.16.1): Could not execute (").append(e.getMessage()).append(")\n");
@@ -1171,7 +1169,7 @@ public class SwarmOrchestrator {
                             <span class="badge" style="background: %s;">%s</span>
                         </div>
                         <div class="token-summary" style="background: #e2e8f0; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600;">
-                            Cumulative Phase Tokens: %,d (Prompt: %,d | Generation: %,d)
+                            Cumulative Phase Tokens: %,d (Prompt: %,d | Generation: %,d | Reasoning: %,d)
                         </div>
                         <div class="history">
                             <strong>Agent Invocation Steps (%d):</strong>
@@ -1179,7 +1177,7 @@ public class SwarmOrchestrator {
                         </div>
                         <div class="content">%s</div>
                     </div>
-                    """, timestamp, statusColor, status, totalTok, totalPrompt, totalGen, historyCount, historyHtml, sanitizedContent);
+                    """, timestamp, statusColor, status, totalTok, totalPrompt, totalGen, thread != null ? thread.getTotalReasoningTokens() : 0L, historyCount, historyHtml, sanitizedContent);
 
             String placeholder = "<!-- RUN_ENTRIES_PLACEHOLDER -->";
             String html;

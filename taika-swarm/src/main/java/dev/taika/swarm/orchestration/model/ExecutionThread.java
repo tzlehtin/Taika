@@ -33,4 +33,8 @@ public class ExecutionThread {
     public long getTotalTokens() {
         return history.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
     }
+
+    public long getTotalReasoningTokens() {
+        return history.stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
+    }
 }

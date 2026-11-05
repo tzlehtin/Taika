@@ -142,10 +142,12 @@ public class AgentService {
         long promptTokens = 0L;
         long generationTokens = 0L;
         long totalTokens = 0L;
+        long reasoningTokens = 0L;
         if (response != null && response.getMetadata() != null && response.getMetadata().getUsage() != null) {
             promptTokens = response.getMetadata().getUsage().getPromptTokens() != null ? response.getMetadata().getUsage().getPromptTokens() : 0L;
             generationTokens = response.getMetadata().getUsage().getCompletionTokens() != null ? response.getMetadata().getUsage().getCompletionTokens() : 0L;
             totalTokens = response.getMetadata().getUsage().getTotalTokens() != null ? response.getMetadata().getUsage().getTotalTokens() : (promptTokens + generationTokens);
+            reasoningTokens = Math.max(0L, totalTokens - (promptTokens + generationTokens));
         }
         logger.info("AI execution finished. Response: {}", responseContent);
 
@@ -157,7 +159,8 @@ public class AgentService {
                 responseContent,
                 promptTokens,
                 generationTokens,
-                totalTokens
+                totalTokens,
+                reasoningTokens
         );
     }
 
@@ -170,7 +173,8 @@ public class AgentService {
                 if (lower.contains("429") || lower.contains("resource exhausted") || lower.contains("quota") || lower.contains("rate limit")
                         || lower.contains("connection reset") || lower.contains("connection closed")
                         || lower.contains("timeout") || lower.contains("timed out")
-                        || lower.contains("503") || lower.contains("502") || lower.contains("504") || lower.contains("unavailable")) {
+                        || lower.contains("503") || lower.contains("502") || lower.contains("504") || lower.contains("unavailable")
+                        || lower.contains("no toolcallback found")) {
                     return true;
                 }
             }
@@ -182,7 +186,7 @@ public class AgentService {
     private String[] getGlobPatternsForAgent(AgentType agentType) {
         return switch (agentType) {
             case ROBOT_TESTER -> new String[]{"*.md", "pom.xml", "package.json", "*.robot"};
-            case VALIDATOR -> new String[]{"*.md", "pom.xml", "package.json"};
+            case VALIDATOR -> new String[]{"*.java", "*.vue", "*.ts", "*.js", "*.md", "pom.xml", "package.json", "*.env", "*.robot"};
             case AUDITOR -> new String[]{"*.java", "*.vue", "*.ts", "*.js", "*.md", "pom.xml", "package.json", "*.env", "*.robot"};
             default -> new String[]{"*.java", "*.vue", "*.ts", "*.js", "*.md", "pom.xml", "package.json", "*.env", "*.robot"};
         };
@@ -316,18 +320,21 @@ public class AgentService {
                 STRICT RULES:
                 1. If Java project (pom.xml exists): Write JUnit 5 tests under `src/test/java/...`.
                    If Vue / TypeScript project (package.json exists): Write Vitest / Vue Test Utils tests under `tests/unit/...` or `src/...`.
-                2. CRITICAL TDD RULE: Unit tests MUST test the REAL specification requirements defined in `api.md` and `context.md`.
+                2. CRITICAL TDD & CONTRACT RULE: Unit tests MUST test the REAL specification requirements defined in `api.md` and `context.md`.
+                   - Strictly inspect `api.md` for exact return types and DTO structures (e.g. if `api.md` specifies `ValidationError` with `field` and `message`, you MUST test for that structure, not a simplified string list).
                    - NEVER write tests that test dummy behavior or expect dummy placeholder error messages!
+                   - REGRESSION DEFENSE: You are FORBIDDEN from deleting existing edge-case tests (such as whitespace, multiple '@' symbols, consecutive dots, or tab/newline characters).
                    - Tests must assert the TRUE expected behavior according to the API contract (e.g. valid inputs are valid, invalid inputs return the specific errors defined in api.md).
                    - NEVER assert exact error counts or list sizes (e.g. NEVER use `assertEquals(3, errors.size())` or `hasSize(3)`). Multiple validation rules can trigger simultaneously.
-                     Instead, always assert: `assertFalse(result.isValid());` and `assertTrue(result.getErrors().contains("Expected error"));`
+                     Instead, assert: `assertFalse(result.isValid());` and verify the expected error messages/objects exist.
                 3. Create minimal dummy production classes or stubs (with default return values or simple logic) so that the code compiles, unit tests pass, and any existing Robot Framework tests pass.
                 4. Mark all dummy/stub code with explicit comments: `// TODO: [explain why this is a dummy stub and what full implementation is needed]`.
                 5. KISS JAVA VALIDATION RULES:
                    - DO NOT use complex regular expressions or escape characters (`\\d`, `\\.`, `\\\\.`). They break compiler escaping!
                    - To check digits: use `password.chars().anyMatch(Character::isDigit)`
                    - To check uppercase: use `password.chars().anyMatch(Character::isUpperCase)`
-                   - To check email: use simple string checks (e.g. `email.contains("@") && email.contains(".") && !email.startsWith("@") && !email.endsWith(".")`)
+                   - To check whitespace in email or strings: use `s.chars().anyMatch(Character::isWhitespace)` to reliably catch spaces, tabs ('\\t'), and newlines ('\\n').
+                   - To check single '@': verify `email.indexOf('@') >= 0 && email.indexOf('@') == email.lastIndexOf('@')`.
                 6. CRITICAL TOOL CALL MANDATE:
                    - You MUST use the `fileSystemWriter` tool for EVERY file you create or modify (e.g. pom.xml, classes, test classes).
                    - NEVER output Java source code or markdown code blocks in your final text response. You MUST invoke `fileSystemWriter` first.
@@ -342,14 +349,16 @@ public class AgentService {
                 
                 STRICT RULES:
                 1. Inspect existing source code for all `TODO:` comments and dummy implementations created by the test phase.
-                2. Implement full, robust production logic meeting all requirements in `context.md` and `api.md`, replacing the dummy stubs.
+                2. Implement full, robust production logic meeting all requirements in `context.md` and `api.md`, replacing the dummy stubs. Strictly follow the DTO signatures specified in `api.md` (e.g. `ValidationError` fields).
                 3. Remove resolved `TODO:` comments once full production logic is implemented.
                 4. Ensure all valid unit tests and Robot Framework tests pass. If an existing unit test asserted dummy-specific behavior that contradicts api.md, you may adjust the test assertion to match the specification.
+                5. REGRESSION DEFENSE: Do NOT weaken or remove existing validation logic. Ensure whitespace checks cover all whitespace (`Character::isWhitespace`), reject multiple '@' symbols, and handle edge cases without shortcuts.
                 5. KISS JAVA VALIDATION RULES:
                    - DO NOT use complex regular expressions or escape characters (`\\d`, `\\.`, `\\\\.`). They break compiler escaping!
                    - To check digits: use `password.chars().anyMatch(Character::isDigit)`
                    - To check uppercase: use `password.chars().anyMatch(Character::isUpperCase)`
-                   - To check email: use simple string checks (e.g. `email.contains("@") && email.contains(".") && !email.startsWith("@") && !email.endsWith(".")`)
+                   - To check whitespace: use `s.chars().anyMatch(Character::isWhitespace)`
+                   - To check single '@': verify `email.indexOf('@') >= 0 && email.indexOf('@') == email.lastIndexOf('@')`
                 6. CRITICAL TOOL CALL MANDATE:
                    - You MUST call `fileSystemWriter` for EVERY file you modify.
                    - NEVER output file contents directly in your text response.
@@ -365,6 +374,12 @@ public class AgentService {
                 Your task is to review the code and tests against context.md, api.md, and README.md.
                 CRITICAL RULE: If task.md is NOT present, NEVER modify README.md, context.md, or api.md!
                 If task.md IS present, verify that README.md, context.md, and api.md have been updated to match task.md.
+                
+                NO-TOOL INSTRUCTION:
+                - You have NO tools and must NOT call any functions or tools.
+                - All relevant files, specifications, and test results are already included in your context.
+                - Output your entire verification report strictly as plain text.
+
                 In your final text response, provide a concise summary of the verification status, satisfied requirements, and test results.
                 """.formatted(modelName, modelName);
         }

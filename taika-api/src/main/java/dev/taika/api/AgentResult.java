@@ -13,6 +13,7 @@ import java.util.List;
  * @param promptTokens     Number of prompt tokens consumed.
  * @param generationTokens Number of generation/completion tokens consumed.
  * @param totalTokens      Total tokens consumed.
+ * @param reasoningTokens  Number of internal reasoning/thinking tokens consumed.
  */
 public record AgentResult(
         String taskId,
@@ -22,9 +23,16 @@ public record AgentResult(
         String executionLog,
         long promptTokens,
         long generationTokens,
-        long totalTokens
+        long totalTokens,
+        long reasoningTokens
 ) {
     public AgentResult(String taskId, String status, String summary, List<String> modifiedFiles, String executionLog) {
-        this(taskId, status, summary, modifiedFiles, executionLog, 0L, 0L, 0L);
+        this(taskId, status, summary, modifiedFiles, executionLog, 0L, 0L, 0L, 0L);
+    }
+
+    public AgentResult(String taskId, String status, String summary, List<String> modifiedFiles, String executionLog,
+                       long promptTokens, long generationTokens, long totalTokens) {
+        this(taskId, status, summary, modifiedFiles, executionLog, promptTokens, generationTokens, totalTokens,
+                Math.max(0L, totalTokens - (promptTokens + generationTokens)));
     }
 }
