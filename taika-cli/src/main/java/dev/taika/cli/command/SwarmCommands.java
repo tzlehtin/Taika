@@ -21,7 +21,7 @@ public class SwarmCommands {
     @ShellMethod(key = {"gen-code", "code"}, value = "Generates unit tests, dummy stubs, and production code following deterministic TDD loops.")
     public String generateCode(
             @ShellOption(value = {"--path", "-p"}, help = "The absolute or relative path to the root directory of the project.") String path,
-            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "8", help = "Maximum self-healing compile/test iterations per phase.") int maxLoops,
+            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "3", help = "Maximum self-healing compile/test iterations per phase.") int maxLoops,
             @ShellOption(value = {"--objective", "-o"}, defaultValue = ShellOption.NULL, help = "Optional custom objective or feature request.") String objective
     ) {
         System.out.println("Starting Code generation with deterministic TDD loops:");
@@ -49,8 +49,10 @@ public class SwarmCommands {
 
             SwarmResult result = swarmOrchestrator.generateCode(projectPath, maxLoops, objective);
 
-            return String.format("\nCode Generation Complete!\nStatus: %s\nReport File: %s\nSummary:\n%s\nHistory: %d agent invocations.",
+            long totalTokens = result.invocationHistory().stream().mapToLong(l -> l.totalTokens()).sum();
+            return String.format("\nCode Generation Complete!\nStatus: %s\nReport File: %s\nToken Usage: %,d total tokens\nSummary:\n%s\nHistory: %d agent invocations.",
                     result.status(), projectPath.resolve("taika-report-gen-code.html"),
+                    totalTokens,
                     result.finalSummary(), result.invocationHistory().size());
         } catch (Exception e) {
             return "An unexpected error occurred during code generation: " + e.getMessage();
@@ -124,10 +126,12 @@ public class SwarmCommands {
             SwarmResult result = (scanVulnerabilities || runMutation)
                     ? swarmOrchestrator.audit(projectPath, scanVulnerabilities, runMutation)
                     : swarmOrchestrator.audit(projectPath);
-            return String.format("\nAudit Complete!\nStatus: %s\nReport File: %s\nTask File: %s\nSummary:\n%s",
+            long totalTokens = result.invocationHistory().stream().mapToLong(l -> l.totalTokens()).sum();
+            return String.format("\nAudit Complete!\nStatus: %s\nReport File: %s\nTask File: %s\nToken Usage: %,d total tokens\nSummary:\n%s",
                     result.status(),
                     projectPath.resolve("taika-report-audit.html"),
                     projectPath.resolve("task.md"),
+                    totalTokens,
                     result.finalSummary());
         } catch (Exception e) {
             return "An unexpected error occurred during audit: " + e.getMessage();
@@ -137,7 +141,7 @@ public class SwarmCommands {
     @ShellMethod(key = {"gen-robots", "robot-tests"}, value = "Generates Robot Framework test suites based on context.md and api.md.")
     public String generateRobotTests(
             @ShellOption(value = {"--path", "-p"}, help = "The absolute or relative path to the root directory of the project.") String path,
-            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "8", help = "Maximum dry-run self-healing iterations.") int maxLoops
+            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "3", help = "Maximum dry-run self-healing iterations.") int maxLoops
     ) {
         System.out.println("Starting Robot test suite generation:");
         System.out.println("Project Path: " + path);
@@ -155,8 +159,9 @@ public class SwarmCommands {
             }
 
             SwarmResult result = swarmOrchestrator.generateRobotTests(projectPath, maxLoops);
-            return String.format("\nRobot Test Generation Complete!\nStatus: %s\nReport File: %s\nSummary:\n%s",
-                    result.status(), projectPath.resolve("taika-report-gen-robots.html"), result.finalSummary());
+            long totalTokens = result.invocationHistory().stream().mapToLong(l -> l.totalTokens()).sum();
+            return String.format("\nRobot Test Generation Complete!\nStatus: %s\nReport File: %s\nToken Usage: %,d total tokens\nSummary:\n%s",
+                    result.status(), projectPath.resolve("taika-report-gen-robots.html"), totalTokens, result.finalSummary());
         } catch (Exception e) {
             return "An unexpected error occurred during Robot test generation: " + e.getMessage();
         }
@@ -173,7 +178,7 @@ public class SwarmCommands {
     @ShellMethod(key = {"pipeline", "flow", "auto"}, value = "Executes the full automated workflow: gen-robots -> gen-code -> audit in sequence.")
     public String pipeline(
             @ShellOption(value = {"--path", "-p"}, arity = 1, help = "The absolute or relative path to the root directory of the project.") String path,
-            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "8", help = "Maximum iterations per phase.") int maxLoops,
+            @ShellOption(value = {"--max-loops", "-m"}, defaultValue = "3", help = "Maximum iterations per phase.") int maxLoops,
             @ShellOption(value = {"--objective", "-o"}, defaultValue = ShellOption.NULL, help = "Optional custom objective or feature request.") String objective,
             @ShellOption(value = {"--scan-vulnerabilities", "--security", "-s"}, defaultValue = "false", help = "Include deep dependency vulnerability scanning (OWASP / npm audit).") boolean scanVulnerabilities,
             @ShellOption(value = {"--mutation", "-u"}, defaultValue = "false", help = "Include mutation testing (PITest / Stryker) in audit phase.") boolean runMutation
@@ -209,8 +214,9 @@ public class SwarmCommands {
             SwarmResult result = (scanVulnerabilities || runMutation)
                     ? swarmOrchestrator.pipeline(projectPath, maxLoops, objective, scanVulnerabilities, runMutation)
                     : swarmOrchestrator.pipeline(projectPath, maxLoops, objective);
-            return String.format("\nPipeline Complete!\nStatus: %s\nSummary:\n%s",
-                    result.status(), result.finalSummary());
+            long totalTokens = result.invocationHistory().stream().mapToLong(l -> l.totalTokens()).sum();
+            return String.format("\nPipeline Complete!\nStatus: %s\nTotal Pipeline Tokens: %,d\nSummary:\n%s",
+                    result.status(), totalTokens, result.finalSummary());
         } catch (Exception e) {
             return "An unexpected error occurred during pipeline execution: " + e.getMessage();
         }

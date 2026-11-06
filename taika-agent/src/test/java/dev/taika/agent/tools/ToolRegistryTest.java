@@ -1,5 +1,6 @@
 package dev.taika.agent.tools;
 
+import dev.taika.api.AgentType;
 import dev.taika.tools.service.FileReader;
 import dev.taika.tools.service.FileSystemReader;
 import dev.taika.tools.service.FileSystemWriter;
@@ -45,7 +46,7 @@ class ToolRegistryTest {
     void shouldInitializeAndRegisterAllToolCallbacks() {
         // Assert
         assertFalse(toolRegistry.getToolCallbacks().isEmpty());
-        assertEquals(4, toolRegistry.getToolCallbacks().size(), "Should register all 4 tools.");
+        assertEquals(3, toolRegistry.getToolCallbacks().size(), "Should register 3 tools.");
     }
 
     @Test
@@ -54,10 +55,29 @@ class ToolRegistryTest {
                 .map(cb -> cb.getToolDefinition().name())
                 .collect(Collectors.toSet());
 
-        assertEquals(4, toolNames.size(), "Should register exactly 4 tools.");
+        assertEquals(3, toolNames.size());
         assertTrue(toolNames.contains("fileSystemReader"));
         assertTrue(toolNames.contains("fileSystemWriter"));
-        assertTrue(toolNames.contains("mavenExecutor"));
         assertTrue(toolNames.contains("fileReader"));
+    }
+
+    @Test
+    void shouldRegisterOnlyWriterForRobotTester() {
+        var registry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, Path.of("."), AgentType.ROBOT_TESTER);
+        assertEquals(1, registry.getToolCallbacks().size());
+        assertEquals("fileSystemWriter", registry.getToolCallbacks().get(0).getToolDefinition().name());
+    }
+
+    @Test
+    void shouldRegisterNoToolsForValidator() {
+        var registry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, Path.of("."), AgentType.VALIDATOR);
+        assertTrue(registry.getToolCallbacks().isEmpty());
+    }
+
+    @Test
+    void shouldRegisterOnlyWriterForCoder() {
+        var registry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, Path.of("."), AgentType.CODER);
+        assertEquals(1, registry.getToolCallbacks().size());
+        assertEquals("fileSystemWriter", registry.getToolCallbacks().get(0).getToolDefinition().name());
     }
 }

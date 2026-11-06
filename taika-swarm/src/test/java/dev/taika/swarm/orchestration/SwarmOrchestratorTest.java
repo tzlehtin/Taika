@@ -45,7 +45,7 @@ class SwarmOrchestratorTest {
     void generateRobotTests_shouldSucceedWhenAgentReturnsSuccess() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
-        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Robot tests created", List.of(), "Suite details...");
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Robot tests created", List.of(), "Suite details...", 100L, 50L, 150L);
         when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
         org.mockito.Mockito.doReturn(new SwarmOrchestrator.DryRunResult(true, "Dry run passed"))
                 .when(spiedOrchestrator).executeRobotDryRun(fakePath);
@@ -65,7 +65,8 @@ class SwarmOrchestratorTest {
                 "SUCCESS",
                 "Audit completed",
                 List.of("/fake/project/task.md"),
-                "Audit findings: tests are tautological."
+                "Audit findings: tests are tautological.",
+                200L, 100L, 300L
         );
         when(agentService.executeTask(eq(fakePath), eq(AgentType.AUDITOR), anyString())).thenReturn(successResult);
 
@@ -91,7 +92,8 @@ class SwarmOrchestratorTest {
                 "SUCCESS",
                 "Audit passed",
                 List.of(),
-                "AUDIT STATUS: PASSED - All quality rules and tests verified."
+                "AUDIT STATUS: PASSED - All quality rules and tests verified.",
+                150L, 50L, 200L
         );
         when(agentService.executeTask(eq(tempDir), eq(AgentType.AUDITOR), anyString())).thenReturn(cleanResult);
 
@@ -309,7 +311,7 @@ class SwarmOrchestratorTest {
     void generateRobotTests_shouldRetryAndSucceedWhenDryRunFailsInitially() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
-        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Generated tests", List.of(), "Log output");
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Generated tests", List.of(), "Log output", 100L, 50L, 150L);
         when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
 
         // 1. iteration fails dry-run, 2. iteration passes
@@ -330,7 +332,7 @@ class SwarmOrchestratorTest {
     void generateRobotTests_shouldFailWhenMaxLoopsReached() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
-        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Generated tests", List.of(), "Log output");
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Generated tests", List.of(), "Log output", 100L, 50L, 150L);
         when(agentService.executeTask(eq(fakePath), eq(AgentType.ROBOT_TESTER), anyString())).thenReturn(successResult);
         org.mockito.Mockito.doReturn(new SwarmOrchestrator.DryRunResult(false, "Persistent keyword error"))
                 .when(spiedOrchestrator).executeRobotDryRun(fakePath);
@@ -372,7 +374,7 @@ class SwarmOrchestratorTest {
     void generateCode_shouldSucceedWhenAllPhasesPass() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
-        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log");
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log", 100L, 50L, 150L);
         when(agentService.executeTask(eq(fakePath), any(AgentType.class), anyString())).thenReturn(successResult);
         org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(true, "All tests passed"))
                 .when(spiedOrchestrator).executeUnitTestRun(fakePath);
@@ -390,7 +392,7 @@ class SwarmOrchestratorTest {
     void generateCode_shouldRetryAndSucceedWhenUnitTestFailsInitially() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
-        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log");
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log", 100L, 50L, 150L);
         when(agentService.executeTask(eq(fakePath), any(AgentType.class), anyString())).thenReturn(successResult);
 
         // 1st unit test run fails, 2nd passes; CODER test run passes
@@ -411,7 +413,7 @@ class SwarmOrchestratorTest {
     void generateCode_shouldFailWhenUnitTestPhaseExceedsMaxLoops() {
         // Arrange
         SwarmOrchestrator spiedOrchestrator = org.mockito.Mockito.spy(swarmOrchestrator);
-        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log");
+        var successResult = new AgentResult(UUID.randomUUID().toString(), "SUCCESS", "Step passed", List.of(), "Execution log", 100L, 50L, 150L);
         when(agentService.executeTask(eq(fakePath), eq(AgentType.UNIT_TESTER), anyString())).thenReturn(successResult);
         org.mockito.Mockito.doReturn(new SwarmOrchestrator.TestRunResult(false, "Persistent test failure"))
                 .when(spiedOrchestrator).executeUnitTestRun(fakePath);

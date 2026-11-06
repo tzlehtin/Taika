@@ -21,4 +21,20 @@ public class ExecutionThread {
     }
 
     public String getId() { return id; }
+
+    public long getTotalPromptTokens() {
+        return history.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+    }
+
+    public long getTotalGenerationTokens() {
+        return history.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+    }
+
+    public long getTotalTokens() {
+        return history.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+    }
+
+    public long getTotalReasoningTokens() {
+        return history.stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
+    }
 }

@@ -1,5 +1,6 @@
 package dev.taika.agent.tools;
 
+import dev.taika.api.AgentType;
 import dev.taika.tools.service.FileReader;
 import dev.taika.tools.service.FileSystemReader;
 import dev.taika.tools.service.FileSystemWriter;
@@ -34,10 +35,45 @@ public class ToolRegistry {
                         FileSystemWriter fileSystemWriter,
                         MavenExecutor mavenExecutor,
                         FileReader fileReader,
-                        Path projectPath) { // Add projectPath to the constructor
+                        Path projectPath) {
+        this(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, projectPath, null);
+    }
+
+    public ToolRegistry(FileSystemReader fileSystemReader,
+                        FileSystemWriter fileSystemWriter,
+                        MavenExecutor mavenExecutor,
+                        FileReader fileReader,
+                        Path projectPath,
+                        AgentType agentType) {
 
         this.toolCallbacks = new ArrayList<>();
 
+        // VALIDATOR needs 0 tools (pure review and verification)
+        if (agentType == AgentType.VALIDATOR) {
+            return;
+        }
+
+        // ROBOT_TESTER only needs to write the .robot file (SwarmOrchestrator runs dry-run)
+        if (agentType == AgentType.ROBOT_TESTER) {
+            toolCallbacks.add(createWriterTool(fileSystemWriter, projectPath));
+            return;
+        }
+
+        // AUDITOR only needs fileSystemWriter (to create task.md) and fileReader
+        if (agentType == AgentType.AUDITOR) {
+            toolCallbacks.add(createWriterTool(fileSystemWriter, projectPath));
+            toolCallbacks.add(createSingleFileReaderTool(fileReader, projectPath));
+            return;
+        }
+
+        // UNIT_TESTER and CODER only need writer (all existing files are already assembled into prompt context)
+        // Eliminating fileReader prevents multi-turn prompt snowballing where the model re-reads already provided files.
+        if (agentType == AgentType.UNIT_TESTER || agentType == AgentType.CODER) {
+            toolCallbacks.add(createWriterTool(fileSystemWriter, projectPath));
+            return;
+        }
+
+        // Default / null role: register standard tools (e.g. for testing)
         // Wrap each tool service as a FunctionCallback returning structured Map for Google GenAI JSON parsing.
         toolCallbacks.add(FunctionToolCallback.builder("fileSystemReader", (FileSystemReader.ReadRequest request) -> {
                     // Ensure the root path for reading is always within the project path
@@ -64,12 +100,15 @@ public class ToolRegistry {
                 .description("Recursively finds and reads files matching glob patterns.")
                 .inputType(FileSystemReader.ReadRequest.class).build());
 
-        toolCallbacks.add(FunctionToolCallback.builder("fileSystemWriter", (FileSystemWriter.WriteRequest request) -> {
-                    // CRITICAL FIX: Resolve the AI-generated path against the absolute project path.
+        toolCallbacks.add(createWriterTool(fileSystemWriter, projectPath));
+        toolCallbacks.add(createSingleFileReaderTool(fileReader, projectPath));
+    }
+
+    private ToolCallback createWriterTool(FileSystemWriter fileSystemWriter, Path projectPath) {
+        return FunctionToolCallback.builder("fileSystemWriter", (FileSystemWriter.WriteRequest request) -> {
                     Path absolutePath = projectPath.resolve(request.filePath()).normalize();
                     logger.info("TOOL CALL: fileSystemWriter | Absolute Path: {}", absolutePath);
                     try {
-                        // Create a new, safe request with the absolute path.
                         writtenFiles.add(absolutePath.toString());
                         String writeResult = fileSystemWriter.write(new FileSystemWriter.WriteRequest(absolutePath.toString(), request.content()));
                         return Map.of("status", "SUCCESS", "message", writeResult);
@@ -79,30 +118,14 @@ public class ToolRegistry {
                     }
                 })
                 .description("Writes or overwrites content to a specified file.")
-                .inputType(FileSystemWriter.WriteRequest.class).build());
+                .inputType(FileSystemWriter.WriteRequest.class).build();
+    }
 
-        toolCallbacks.add(FunctionToolCallback.builder("mavenExecutor", (MavenExecutor.ExecuteRequest request) -> {
-                    // CRITICAL FIX: Ensure maven always runs in the correct project directory.
-                    Path absolutePath = projectPath.resolve(request.projectPath()).normalize();
-                    logger.info("TOOL CALL: mavenExecutor | Absolute Path: {} | Goals: {}", absolutePath, String.join(" ", request.goals()));
-                    try {
-                        // Create a new, safe request with the absolute path.
-                        String output = mavenExecutor.execute(new MavenExecutor.ExecuteRequest(absolutePath.toString(), request.goals()));
-                        return Map.of("status", "SUCCESS", "output", output != null ? output : "");
-                    } catch (Exception e) {
-                        logger.error("TOOL ERROR: mavenExecutor failed.", e);
-                        return Map.of("status", "ERROR", "message", String.valueOf(e.getMessage()));
-                    }
-                })
-                .description("Executes Maven commands in a specified project directory.")
-                .inputType(MavenExecutor.ExecuteRequest.class).build());
-
-        toolCallbacks.add(FunctionToolCallback.builder("fileReader", (FileReader.ReadFileRequest request) -> {
-                    // CRITICAL FIX: Resolve the AI-generated path against the absolute project path.
+    private ToolCallback createSingleFileReaderTool(FileReader fileReader, Path projectPath) {
+        return FunctionToolCallback.builder("fileReader", (FileReader.ReadFileRequest request) -> {
                     Path absolutePath = projectPath.resolve(request.filePath()).normalize();
                     logger.info("TOOL CALL: fileReader | Absolute Path: {}", absolutePath);
                     try {
-                        // Create a new, safe request with the absolute path.
                         String content = fileReader.readFile(new FileReader.ReadFileRequest(absolutePath.toString()));
                         return Map.of("status", "SUCCESS", "content", content);
                     } catch (Exception e) {
@@ -111,7 +134,7 @@ public class ToolRegistry {
                     }
                 })
                 .description("Reads the content of a single file.")
-                .inputType(FileReader.ReadFileRequest.class).build());
+                .inputType(FileReader.ReadFileRequest.class).build();
     }
 
     public List<ToolCallback> getToolCallbacks() {

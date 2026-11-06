@@ -26,8 +26,8 @@ public class SwarmOrchestrator {
 
     private static final Logger logger = LoggerFactory.getLogger(SwarmOrchestrator.class);
     private static final int MAX_ITERATIONS = 10; // To prevent infinite loops
-    private static final int DEFAULT_MAX_ROBOT_LOOPS = 8;
-    private static final int DEFAULT_MAX_CODE_LOOPS = 8;
+    private static final int DEFAULT_MAX_ROBOT_LOOPS = 3;
+    private static final int DEFAULT_MAX_CODE_LOOPS = 3;
 
     private final AgentService agentService;
 
@@ -79,8 +79,15 @@ public class SwarmOrchestrator {
         SwarmResult robotResult = generateRobotTests(projectPath, maxLoops);
         if (robotResult.status() != SwarmStatus.SUCCESS) {
             logger.warn("Pipeline halted at step 1 (gen-robots). Status: {}", robotResult.status());
-            return new SwarmResult(robotResult.threadId(), robotResult.status(), robotResult.invocationHistory(),
-                    "Pipeline halted at Step 1 (gen-robots):\n" + robotResult.finalSummary());
+            long totalPromptTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+            long totalGenTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+            long totalTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+            long totalReasoningTokens = robotResult.invocationHistory().stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
+            String summary = String.format(
+                    "Pipeline halted at Step 1 (gen-robots):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Reasoning Tokens: %,d | Total Tokens: %,d",
+                    robotResult.finalSummary(), totalPromptTokens, totalGenTokens, totalReasoningTokens, totalTokens
+            );
+            return new SwarmResult(robotResult.threadId(), robotResult.status(), robotResult.invocationHistory(), summary);
         }
 
         // Step 2: gen-code
@@ -88,8 +95,18 @@ public class SwarmOrchestrator {
         SwarmResult codeResult = generateCode(projectPath, maxLoops, objective);
         if (codeResult.status() != SwarmStatus.SUCCESS) {
             logger.warn("Pipeline halted at step 2 (gen-code). Status: {}", codeResult.status());
-            return new SwarmResult(codeResult.threadId(), codeResult.status(), codeResult.invocationHistory(),
-                    "Pipeline halted at Step 2 (gen-code):\n" + codeResult.finalSummary());
+            List<AgentInvocationLog> combinedHistory = Stream.of(robotResult, codeResult)
+                    .flatMap(r -> r.invocationHistory().stream())
+                    .toList();
+            long totalPromptTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+            long totalGenTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+            long totalTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+            long totalReasoningTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
+            String summary = String.format(
+                    "Pipeline halted at Step 2 (gen-code):\n%s\n\n=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Reasoning Tokens: %,d | Total Tokens: %,d",
+                    codeResult.finalSummary(), totalPromptTokens, totalGenTokens, totalReasoningTokens, totalTokens
+            );
+            return new SwarmResult(codeResult.threadId(), codeResult.status(), combinedHistory, summary);
         }
 
         // Step 3: audit
@@ -97,14 +114,24 @@ public class SwarmOrchestrator {
         SwarmResult auditResult = audit(projectPath, scanVulnerabilities, runMutation);
         SwarmStatus overallStatus = auditResult.status();
 
+        List<AgentInvocationLog> combinedHistory = Stream.of(robotResult, codeResult, auditResult)
+                .flatMap(r -> r.invocationHistory().stream())
+                .toList();
+        long totalPromptTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::promptTokens).sum();
+        long totalGenTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::generationTokens).sum();
+        long totalTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::totalTokens).sum();
+        long totalReasoningTokens = combinedHistory.stream().mapToLong(AgentInvocationLog::reasoningTokens).sum();
+
         String combinedSummary = String.format(
                 "Pipeline Execution Complete (gen-robots -> gen-code -> audit)!\n\n" +
                 "--- Step 1: Robot Tests ---\nStatus: %s\n\n" +
                 "--- Step 2: Code Generation ---\nStatus: %s\n\n" +
-                "--- Step 3: Audit Result ---\n%s",
-                robotResult.status(), codeResult.status(), auditResult.finalSummary()
+                "--- Step 3: Audit Result ---\n%s\n\n" +
+                "=== Total Pipeline Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Reasoning Tokens: %,d | Total Tokens: %,d",
+                robotResult.status(), codeResult.status(), auditResult.finalSummary(),
+                totalPromptTokens, totalGenTokens, totalReasoningTokens, totalTokens
         );
-        return new SwarmResult(auditResult.threadId(), overallStatus, auditResult.invocationHistory(), combinedSummary);
+        return new SwarmResult(auditResult.threadId(), overallStatus, combinedHistory, combinedSummary);
     }
 
     /**
@@ -144,7 +171,7 @@ public class SwarmOrchestrator {
 
         try {
             AgentResult auditResult = agentService.executeTask(projectPath, AgentType.AUDITOR, auditTask);
-            thread.log(new AgentInvocationLog(AgentType.AUDITOR, auditResult.status()));
+            thread.log(new AgentInvocationLog(AgentType.AUDITOR, auditResult.status(), auditResult.promptTokens(), auditResult.generationTokens(), auditResult.totalTokens()));
 
             Path taskMdFile = projectPath.resolve("task.md");
             boolean auditPassed = auditResult.executionLog() != null && auditResult.executionLog().contains("AUDIT STATUS: PASSED");
@@ -167,7 +194,8 @@ public class SwarmOrchestrator {
             
             SwarmStatus auditStatus = Files.exists(taskMdFile) ? SwarmStatus.MAX_ITERATIONS_REACHED : SwarmStatus.SUCCESS;
 
-            String summary = "Project Audit Complete!\n" + taskMdNotice + "\n\n=== Diagnostics ===\n" + diagnostics + "\n\n=== Audit Findings ===\n" + auditResult.executionLog();
+            String summary = String.format("Project Audit Complete!\n%s\n\n=== Diagnostics ===\n%s\n\n=== Token Usage ===\nPrompt: %,d | Generation: %,d | Reasoning: %,d | Total: %,d\n\n=== Audit Findings ===\n%s",
+                    taskMdNotice, diagnostics, thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalReasoningTokens(), thread.getTotalTokens(), auditResult.executionLog());
             writeHtmlReport(projectPath, "taika-report-audit.html", "Taika Project Quality & Test Audit Report", auditStatus, summary, thread);
 
             return new SwarmResult(thread.getId(), auditStatus, thread.getHistory(), summary);
@@ -353,14 +381,9 @@ public class SwarmOrchestrator {
             Path checkstyleXml = projectPath.resolve("target/checkstyle-result.xml");
             if (Files.exists(checkstyleXml)) {
                 String xml = Files.readString(checkstyleXml);
-                List<String> errorLines = xml.lines()
+                List<String> relevantErrors = xml.lines()
                         .filter(line -> line.contains("<error "))
                         .toList();
-                // Filter out non-functional Javadoc noise if default rules are used
-                List<String> relevantErrors = errorLines.stream()
-                        .filter(line -> !line.contains("MissingJavadoc") && !line.contains("JavadocVariable"))
-                        .toList();
-
                 int violationCount = relevantErrors.size();
                 if (violationCount > 0) {
                     sb.append("Java Linter (Checkstyle 3.4.0): FAILED (").append(violationCount).append(" violation(s) found)\n");
@@ -544,10 +567,10 @@ public class SwarmOrchestrator {
                                 score, killed, totalMutations));
                     }
                 } else {
-                    sb.append("Mutation Testing (PITest 1.16.1): PASSED (0 mutations generated or no testable code)\n");
+                    sb.append("Mutation Testing (PITest 1.16.1): SKIPPED (0 mutations generated or no testable code)\n");
                 }
             } else {
-                sb.append("Mutation Testing (PITest 1.16.1): PASSED (0 mutations generated or no report found)\n");
+                sb.append("Mutation Testing (PITest 1.16.1): SKIPPED (No mutation report generated)\n");
             }
         } catch (Exception e) {
             sb.append("Mutation Testing (PITest 1.16.1): Could not execute (").append(e.getMessage()).append(")\n");
@@ -780,11 +803,14 @@ public class SwarmOrchestrator {
         String unitTestTask = """
                 Read context.md, api.md, and README.md.%s%s%s
                 1. Generate comprehensive unit tests (JUnit 5 for Java under src/test/java, or Vitest for Vue under tests/unit or src/).
-                CRITICAL: In tests, assert `assertFalse(result.isValid())` and `assertTrue(errors.contains("..."))`. NEVER assert exact error list size (do NOT use `assertEquals(3, errors.size())`).
+                CRITICAL FOR VUE: If package.json does not exist, create package.json with scripts {"test": "vitest run"}, devDependencies ("vue", "@vitejs/plugin-vue", "vitest", "jsdom", "@vue/test-utils", "typescript") and vite.config.ts on your very first step!
+                CRITICAL FOR JAVA: Assert `assertFalse(result.isValid())` and `assertTrue(errors.contains("..."))`. NEVER assert exact error list size.
+                CRITICAL FOR VUE: In component DOM tests, verify `wrapper.emitted('submit')` and error elements (`[data-test="..."]`). Note that HTML `<input>` elements automatically strip '\\n'; test whitespace using spaces or tabs, or test pure validation functions directly.
                 CRITICAL: Unit tests must assert the TRUE specification requirements. Do NOT write tests that expect dummy behavior or placeholder errors.
                 2. Create initial dummy/stub code or minimal implementations so that BOTH unit tests and any existing Robot Framework tests can compile and pass. Add clear 'TODO: [description]' comments explaining why this quick dummy fix needs proper implementation and what logic remains to be completed.
-                3. In Java, DO NOT use regular expressions. Use Character.isDigit, Character.isUpperCase, and simple string checks (contains('@'), etc.).
-                4. You MUST call fileSystemWriter separately for EVERY file created (pom.xml, classes, tests). NEVER output code in text responses.
+                3. For Java: Avoid complex regex. For Vue/TypeScript: Use clean TypeScript and Vue 3 Composition API.
+                4. NEVER create .py files and NEVER import SeleniumLibrary (only standard Robot libraries are installed).
+                4. You MUST call fileSystemWriter separately for EVERY file created (pom.xml / package.json, source files, tests). NEVER output code in text responses.
                 5. In your response, report what tests were created and what edge cases they cover.
                 """.formatted(customGoal, taskMdInstruction, robotInstruction);
 
@@ -795,7 +821,7 @@ public class SwarmOrchestrator {
             logger.info("Unit test generation iteration {}/{}", loop, maxLoops);
             try {
                 AgentResult result = agentService.executeTask(projectPath, AgentType.UNIT_TESTER, unitTestTask);
-                thread.log(new AgentInvocationLog(AgentType.UNIT_TESTER, result.status()));
+                thread.log(new AgentInvocationLog(AgentType.UNIT_TESTER, result.status(), result.promptTokens(), result.generationTokens(), result.totalTokens()));
 
                 if (!"SUCCESS".equalsIgnoreCase(result.status())) {
                     unitTestTask = "The previous unit test generation attempt failed: " + result.summary() + "\nPlease generate valid tests and dummy stubs.";
@@ -821,8 +847,9 @@ public class SwarmOrchestrator {
                         "Compiler/Test output:\n%s\n\n" +
                         "CRITICAL FIX INSTRUCTIONS:%s\n" +
                         "1. You MUST call `fileSystemWriter` for EVERY file you modify (both test files and implementation files). Do NOT output code in markdown text.\n" +
-                        "2. In Java, DO NOT use regular expressions. Use Character.isDigit, Character.isUpperCase, and simple string checks.\n" +
-                        "3. Do NOT assert exact error collection sizes like assertEquals(3, errors.size()). Assert `assertFalse(result.isValid())` and `assertTrue(errors.contains(...))`.\n" +
+                        "2. For Java: DO NOT use complex regular expressions. Use Character methods.\n" +
+                        "3. For Vue / TypeScript: In single-line `<input>` fields, browsers/JSDOM automatically strip '\\n'. If a test failed due to '\\n' in `<input>`, adjust the test to test whitespace with spaces/tabs (' ') or test the validation function directly.\n" +
+                        "4. Do NOT assert exact error collection sizes.\n" +
                         "Please fix the files using fileSystemWriter so that all tests compile and pass.",
                         testRunResult.output(), noFilesWarning
                 );
@@ -859,7 +886,7 @@ public class SwarmOrchestrator {
             logger.info("Production code implementation iteration {}/{}", loop, maxLoops);
             try {
                 AgentResult result = agentService.executeTask(projectPath, AgentType.CODER, coderTask);
-                thread.log(new AgentInvocationLog(AgentType.CODER, result.status()));
+                thread.log(new AgentInvocationLog(AgentType.CODER, result.status(), result.promptTokens(), result.generationTokens(), result.totalTokens()));
 
                 if (!"SUCCESS".equalsIgnoreCase(result.status())) {
                     coderTask = "The previous implementation attempt failed: " + result.summary() + "\nPlease complete the implementation.";
@@ -912,14 +939,15 @@ public class SwarmOrchestrator {
 
         try {
             AgentResult valResult = agentService.executeTask(projectPath, AgentType.VALIDATOR, validatorTask);
-            thread.log(new AgentInvocationLog(AgentType.VALIDATOR, valResult.status()));
+            thread.log(new AgentInvocationLog(AgentType.VALIDATOR, valResult.status(), valResult.promptTokens(), valResult.generationTokens(), valResult.totalTokens()));
 
             String finalReport = String.format(
                     "Code Generation Complete!\n\n" +
+                    "=== Token Usage ===\nPrompt Tokens: %,d | Generation Tokens: %,d | Total Tokens: %,d\n\n" +
                     "=== Test Suite Report ===\n%s\n\n" +
                     "=== Implementation Summary ===\n%s\n\n" +
                     "=== Quality & Verification Report ===\n%s",
-                    testReport, coderSummary, valResult.executionLog()
+                    thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalTokens(), testReport, coderSummary, valResult.executionLog()
             );
 
             writeHtmlReport(projectPath, "taika-report-gen-code.html", "Taika Code Generation Report", SwarmStatus.SUCCESS, finalReport, thread);
@@ -960,10 +988,18 @@ public class SwarmOrchestrator {
                 logger.info("Executing Maven test validation on: {}", projectPath);
                 pb = new ProcessBuilder("mvn", "test", "-B");
             } else if (Files.exists(projectPath.resolve("package.json"))) {
+                Path pkgJson = projectPath.resolve("package.json");
                 Path nodeModules = projectPath.resolve("node_modules");
-                if (!Files.exists(nodeModules)) {
-                    logger.info("node_modules not found. Running 'npm install' on: {}", projectPath);
-                    runProcess(projectPath, "npm", "install");
+                Path pkgLock = projectPath.resolve("package-lock.json");
+                boolean needsInstall = !Files.exists(nodeModules)
+                        || !Files.exists(pkgLock)
+                        || (Files.getLastModifiedTime(pkgJson).toMillis() > Files.getLastModifiedTime(pkgLock).toMillis());
+                if (needsInstall) {
+                    logger.info("Running 'npm install' on: {}", projectPath);
+                    TestRunResult installResult = runProcess(projectPath, "npm", "install");
+                    if (!installResult.passed()) {
+                        logger.warn("npm install had warnings or errors:\n{}", installResult.output());
+                    }
                 }
                 logger.info("Executing npm test validation on: {}", projectPath);
                 pb = new ProcessBuilder("npm", "test");
@@ -1025,12 +1061,45 @@ public class SwarmOrchestrator {
             }
 
             int exitCode = process.waitFor();
-            return new TestRunResult(exitCode == 0, output.toString());
+            String fullOutput = output.toString();
+            if (exitCode != 0) {
+                Path outputXml = projectPath.resolve("output.xml");
+                String failureDetails = parseRobotOutputXml(outputXml);
+                if (!failureDetails.isBlank()) {
+                    fullOutput += "\n=== Detailed Robot Failure Logs (from output.xml) ===\n" + failureDetails;
+                }
+            }
+            return new TestRunResult(exitCode == 0, fullOutput);
         } catch (java.io.IOException e) {
             logger.error("Failed to execute 'robot' process. Is Robot Framework installed and on PATH?", e);
             return new TestRunResult(false, "System error running 'robot': " + e.getMessage() + ". Please verify that Robot Framework is installed and accessible via PATH.");
         } catch (Exception e) {
             return new TestRunResult(false, "Failed to run 'robot': " + e.getMessage());
+        }
+    }
+
+    private String parseRobotOutputXml(Path outputXml) {
+        if (!Files.exists(outputXml)) {
+            return "";
+        }
+        try {
+            String content = Files.readString(outputXml);
+            StringBuilder sb = new StringBuilder();
+            List<String> messages = content.lines()
+                    .filter(line -> line.contains("level=\"FAIL\"") || line.contains("level=\"ERROR\"")
+                            || line.contains("Process completed with exit code")
+                            || line.contains("The output was:")
+                            || line.contains("STDERR:")
+                            || line.contains("STDOUT:"))
+                    .map(String::trim)
+                    .map(line -> line.replaceAll("<[^>]+>", " ").trim())
+                    .filter(line -> !line.isBlank())
+                    .limit(15)
+                    .toList();
+            messages.forEach(msg -> sb.append("  - ").append(msg).append("\n"));
+            return sb.toString().trim();
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -1052,14 +1121,16 @@ public class SwarmOrchestrator {
                 - Keep tests simple and declarative using test cases and keywords.
                 - Under *** Settings ***, explicitly import 'Library    Collections' and 'Library    String'.
                 - Do NOT invent fake keywords like 'Should Be False' or 'Should Contain Key'. Use standard assertions: 'Should Be Equal', 'Should Be True'.
+                - Do NOT use '$EMPTY' in expressions (use `''` or `${EMPTY}`). Do not write IF/ELSE validation algorithms inside Robot.
                 - Do NOT import Java classes. Do NOT create .py files.
+                - Strictly focus on functional acceptance scenarios for the component/API. Do NOT execute 'npm audit' or dependency security scans in Robot tests!
                 """.formatted(taskMdInstruction);
 
         for (int loop = 1; loop <= maxLoops; loop++) {
             logger.info("Robot test generation iteration {}/{}", loop, maxLoops);
             try {
                 AgentResult result = agentService.executeTask(projectPath, AgentType.ROBOT_TESTER, taskDescription);
-                thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status()));
+                thread.log(new AgentInvocationLog(AgentType.ROBOT_TESTER, result.status(), result.promptTokens(), result.generationTokens(), result.totalTokens()));
 
                 if (!"SUCCESS".equalsIgnoreCase(result.status())) {
                     taskDescription = "The previous generation attempt failed: " + result.summary() + "\nPlease generate valid Robot Framework test files.";
@@ -1070,7 +1141,8 @@ public class SwarmOrchestrator {
                 DryRunResult dryRunResult = executeRobotDryRun(projectPath);
                 if (dryRunResult.passed()) {
                     logger.info("Robot test suite passed dry-run validation on iteration {}", loop);
-                    String reportSummary = String.format("Robot tests generated and verified with dry-run in %d iteration(s):\n%s", loop, result.executionLog());
+                    String reportSummary = String.format("Robot tests generated and verified with dry-run in %d iteration(s):\n\nToken Usage: Prompt: %,d | Generation: %,d | Total: %,d\n\n%s",
+                            loop, thread.getTotalPromptTokens(), thread.getTotalGenerationTokens(), thread.getTotalTokens(), result.executionLog());
                     writeHtmlReport(projectPath, "taika-report-gen-robots.html", "Taika Robot Generation Report", SwarmStatus.SUCCESS, reportSummary, thread);
                     return new SwarmResult(thread.getId(), SwarmStatus.SUCCESS, thread.getHistory(),
                             reportSummary);
@@ -1119,10 +1191,17 @@ public class SwarmOrchestrator {
 
             StringBuilder historyHtml = new StringBuilder();
             int historyCount = 0;
+            long totalPrompt = 0L;
+            long totalGen = 0L;
+            long totalTok = 0L;
             if (thread != null && thread.getHistory() != null) {
                 historyCount = thread.getHistory().size();
+                totalPrompt = thread.getTotalPromptTokens();
+                totalGen = thread.getTotalGenerationTokens();
+                totalTok = thread.getTotalTokens();
                 for (AgentInvocationLog log : thread.getHistory()) {
-                    historyHtml.append(String.format("<li><strong>%s</strong>: %s</li>", log.type(), log.status()));
+                    historyHtml.append(String.format("<li><strong>%s</strong>: %s (Tokens: %,d total | %,d prompt / %,d gen)</li>",
+                            log.type(), log.status(), log.totalTokens(), log.promptTokens(), log.generationTokens()));
                 }
             }
             if (historyHtml.isEmpty()) {
@@ -1136,13 +1215,16 @@ public class SwarmOrchestrator {
                             <span class="timestamp">Execution Time: %s</span>
                             <span class="badge" style="background: %s;">%s</span>
                         </div>
+                        <div class="token-summary" style="background: #e2e8f0; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600;">
+                            Cumulative Phase Tokens: %,d (Prompt: %,d | Generation: %,d | Reasoning: %,d)
+                        </div>
                         <div class="history">
                             <strong>Agent Invocation Steps (%d):</strong>
                             <ul>%s</ul>
                         </div>
                         <div class="content">%s</div>
                     </div>
-                    """, timestamp, statusColor, status, historyCount, historyHtml, sanitizedContent);
+                    """, timestamp, statusColor, status, totalTok, totalPrompt, totalGen, thread != null ? thread.getTotalReasoningTokens() : 0L, historyCount, historyHtml, sanitizedContent);
 
             String placeholder = "<!-- RUN_ENTRIES_PLACEHOLDER -->";
             String html;
