@@ -803,11 +803,14 @@ public class SwarmOrchestrator {
         String unitTestTask = """
                 Read context.md, api.md, and README.md.%s%s%s
                 1. Generate comprehensive unit tests (JUnit 5 for Java under src/test/java, or Vitest for Vue under tests/unit or src/).
-                CRITICAL: In tests, assert `assertFalse(result.isValid())` and `assertTrue(errors.contains("..."))`. NEVER assert exact error list size (do NOT use `assertEquals(3, errors.size())`).
+                CRITICAL FOR VUE: If package.json does not exist, create package.json with scripts {"test": "vitest run"}, devDependencies ("vue", "@vitejs/plugin-vue", "vitest", "jsdom", "@vue/test-utils", "typescript") and vite.config.ts on your very first step!
+                CRITICAL FOR JAVA: Assert `assertFalse(result.isValid())` and `assertTrue(errors.contains("..."))`. NEVER assert exact error list size.
+                CRITICAL FOR VUE: In component DOM tests, verify `wrapper.emitted('submit')` and error elements (`[data-test="..."]`). Note that HTML `<input>` elements automatically strip '\\n'; test whitespace using spaces or tabs, or test pure validation functions directly.
                 CRITICAL: Unit tests must assert the TRUE specification requirements. Do NOT write tests that expect dummy behavior or placeholder errors.
                 2. Create initial dummy/stub code or minimal implementations so that BOTH unit tests and any existing Robot Framework tests can compile and pass. Add clear 'TODO: [description]' comments explaining why this quick dummy fix needs proper implementation and what logic remains to be completed.
-                3. In Java, DO NOT use regular expressions. Use Character.isDigit, Character.isUpperCase, and simple string checks (contains('@'), etc.).
-                4. You MUST call fileSystemWriter separately for EVERY file created (pom.xml, classes, tests). NEVER output code in text responses.
+                3. For Java: Avoid complex regex. For Vue/TypeScript: Use clean TypeScript and Vue 3 Composition API.
+                4. NEVER create .py files and NEVER import SeleniumLibrary (only standard Robot libraries are installed).
+                4. You MUST call fileSystemWriter separately for EVERY file created (pom.xml / package.json, source files, tests). NEVER output code in text responses.
                 5. In your response, report what tests were created and what edge cases they cover.
                 """.formatted(customGoal, taskMdInstruction, robotInstruction);
 
@@ -844,8 +847,9 @@ public class SwarmOrchestrator {
                         "Compiler/Test output:\n%s\n\n" +
                         "CRITICAL FIX INSTRUCTIONS:%s\n" +
                         "1. You MUST call `fileSystemWriter` for EVERY file you modify (both test files and implementation files). Do NOT output code in markdown text.\n" +
-                        "2. In Java, DO NOT use regular expressions. Use Character.isDigit, Character.isUpperCase, and simple string checks.\n" +
-                        "3. Do NOT assert exact error collection sizes like assertEquals(3, errors.size()). Assert `assertFalse(result.isValid())` and `assertTrue(errors.contains(...))`.\n" +
+                        "2. For Java: DO NOT use complex regular expressions. Use Character methods.\n" +
+                        "3. For Vue / TypeScript: In single-line `<input>` fields, browsers/JSDOM automatically strip '\\n'. If a test failed due to '\\n' in `<input>`, adjust the test to test whitespace with spaces/tabs (' ') or test the validation function directly.\n" +
+                        "4. Do NOT assert exact error collection sizes.\n" +
                         "Please fix the files using fileSystemWriter so that all tests compile and pass.",
                         testRunResult.output(), noFilesWarning
                 );
@@ -984,10 +988,18 @@ public class SwarmOrchestrator {
                 logger.info("Executing Maven test validation on: {}", projectPath);
                 pb = new ProcessBuilder("mvn", "test", "-B");
             } else if (Files.exists(projectPath.resolve("package.json"))) {
+                Path pkgJson = projectPath.resolve("package.json");
                 Path nodeModules = projectPath.resolve("node_modules");
-                if (!Files.exists(nodeModules)) {
-                    logger.info("node_modules not found. Running 'npm install' on: {}", projectPath);
-                    runProcess(projectPath, "npm", "install");
+                Path pkgLock = projectPath.resolve("package-lock.json");
+                boolean needsInstall = !Files.exists(nodeModules)
+                        || !Files.exists(pkgLock)
+                        || (Files.getLastModifiedTime(pkgJson).toMillis() > Files.getLastModifiedTime(pkgLock).toMillis());
+                if (needsInstall) {
+                    logger.info("Running 'npm install' on: {}", projectPath);
+                    TestRunResult installResult = runProcess(projectPath, "npm", "install");
+                    if (!installResult.passed()) {
+                        logger.warn("npm install had warnings or errors:\n{}", installResult.output());
+                    }
                 }
                 logger.info("Executing npm test validation on: {}", projectPath);
                 pb = new ProcessBuilder("npm", "test");
@@ -1049,12 +1061,45 @@ public class SwarmOrchestrator {
             }
 
             int exitCode = process.waitFor();
-            return new TestRunResult(exitCode == 0, output.toString());
+            String fullOutput = output.toString();
+            if (exitCode != 0) {
+                Path outputXml = projectPath.resolve("output.xml");
+                String failureDetails = parseRobotOutputXml(outputXml);
+                if (!failureDetails.isBlank()) {
+                    fullOutput += "\n=== Detailed Robot Failure Logs (from output.xml) ===\n" + failureDetails;
+                }
+            }
+            return new TestRunResult(exitCode == 0, fullOutput);
         } catch (java.io.IOException e) {
             logger.error("Failed to execute 'robot' process. Is Robot Framework installed and on PATH?", e);
             return new TestRunResult(false, "System error running 'robot': " + e.getMessage() + ". Please verify that Robot Framework is installed and accessible via PATH.");
         } catch (Exception e) {
             return new TestRunResult(false, "Failed to run 'robot': " + e.getMessage());
+        }
+    }
+
+    private String parseRobotOutputXml(Path outputXml) {
+        if (!Files.exists(outputXml)) {
+            return "";
+        }
+        try {
+            String content = Files.readString(outputXml);
+            StringBuilder sb = new StringBuilder();
+            List<String> messages = content.lines()
+                    .filter(line -> line.contains("level=\"FAIL\"") || line.contains("level=\"ERROR\"")
+                            || line.contains("Process completed with exit code")
+                            || line.contains("The output was:")
+                            || line.contains("STDERR:")
+                            || line.contains("STDOUT:"))
+                    .map(String::trim)
+                    .map(line -> line.replaceAll("<[^>]+>", " ").trim())
+                    .filter(line -> !line.isBlank())
+                    .limit(15)
+                    .toList();
+            messages.forEach(msg -> sb.append("  - ").append(msg).append("\n"));
+            return sb.toString().trim();
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -1076,7 +1121,9 @@ public class SwarmOrchestrator {
                 - Keep tests simple and declarative using test cases and keywords.
                 - Under *** Settings ***, explicitly import 'Library    Collections' and 'Library    String'.
                 - Do NOT invent fake keywords like 'Should Be False' or 'Should Contain Key'. Use standard assertions: 'Should Be Equal', 'Should Be True'.
+                - Do NOT use '$EMPTY' in expressions (use `''` or `${EMPTY}`). Do not write IF/ELSE validation algorithms inside Robot.
                 - Do NOT import Java classes. Do NOT create .py files.
+                - Strictly focus on functional acceptance scenarios for the component/API. Do NOT execute 'npm audit' or dependency security scans in Robot tests!
                 """.formatted(taskMdInstruction);
 
         for (int loop = 1; loop <= maxLoops; loop++) {

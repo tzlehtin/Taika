@@ -174,9 +174,13 @@ public class AgentService {
                         || lower.contains("connection reset") || lower.contains("connection closed")
                         || lower.contains("timeout") || lower.contains("timed out")
                         || lower.contains("503") || lower.contains("502") || lower.contains("504") || lower.contains("unavailable")
-                        || lower.contains("no toolcallback found")) {
+                        || lower.contains("no toolcallback found")
+                        || lower.contains("no value present")) {
                     return true;
                 }
+            }
+            if (current instanceof java.util.NoSuchElementException) {
+                return true;
             }
             current = current.getCause();
         }
@@ -280,10 +284,20 @@ public class AgentService {
                    - There is NO 'Should Contain Key' keyword. Use `Dictionary Should Contain Key`.
                    - Do NOT prefix built-in keywords with 'BuiltIn.' or 'Collections.'. Call them plainly: `Should Be Equal`, `Log`, `Should Contain`.
                 4. Keep keywords extremely simple and declarative. Do NOT attempt to implement complex validation algorithms inside Robot.
+                   - NEVER write IF/ELSE logic or loops to re-implement business validation inside Robot!
+                   - NEVER use '$EMPTY' in expressions (use `''` or `${EMPTY}`). Built-in variables MUST use `${EMPTY}`, `${NONE}`, `${TRUE}`.
                    Define high-level user scenario keywords (e.g. `Validate Credentials`, `Check Validation Status`) with simple assertions.
                 5. NEVER import Java classes (e.g. `Library com.lumo...`) and NEVER create separate .py files.
+                   NEVER import SeleniumLibrary or Browser library (they are not installed). Only standard BuiltIn, Collections, String, Process libraries are available.
                 6. Write the test suite to `robots/credentials_validation.robot`.
                 7. You MUST call `fileSystemWriter` tool immediately to write the `.robot` file.
+                8. PROCESS EXECUTION RULE:
+                   - If your keywords execute commands via `Library    Process` (`Run Process`), ALWAYS add a failure message showing stderr/stdout:
+                     `${result}=    Run Process    ...`
+                     `Should Be Equal As Integers    ${result.rc}    0    msg=Process failed with rc=${result.rc}. STDERR: ${result.stderr} STDOUT: ${result.stdout}`
+                9. SCOPE RESTRICTION:
+                   - Robot tests are strictly for functional acceptance testing of components, APIs, or business logic (valid and invalid cases).
+                   - NEVER write Robot tests that execute security scans or linters (like 'npm audit', 'mvn dependency-check', 'eslint', or 'spotbugs'). Those tools are executed exclusively in the Taika audit phase, not in acceptance suites!
                 
                 EXAMPLE OF A CLEAN, VALID .ROBOT FILE:
                 *** Settings ***
@@ -319,22 +333,36 @@ public class AgentService {
                 
                 STRICT RULES:
                 1. If Java project (pom.xml exists): Write JUnit 5 tests under `src/test/java/...`.
-                   If Vue / TypeScript project (package.json exists): Write Vitest / Vue Test Utils tests under `tests/unit/...` or `src/...`.
+                   If Vue / TypeScript project (package.json exists or context specifies Vue):
+                   - If package.json does not exist yet, you MUST create `package.json` (with scripts: {"test": "vitest run"} and devDependencies: "vue", "@vitejs/plugin-vue", "vitest", "jsdom", "@vue/test-utils", "typescript") AND `vite.config.ts` (with vue() plugin and environment: 'jsdom') on your VERY FIRST step!
+                   - Write Vitest / Vue Test Utils tests under `tests/unit/...` or `src/...`.
                 2. CRITICAL TDD & CONTRACT RULE: Unit tests MUST test the REAL specification requirements defined in `api.md` and `context.md`.
                    - Strictly inspect `api.md` for exact return types and DTO structures (e.g. if `api.md` specifies `ValidationError` with `field` and `message`, you MUST test for that structure, not a simplified string list).
                    - NEVER write tests that test dummy behavior or expect dummy placeholder error messages!
-                   - REGRESSION DEFENSE: You are FORBIDDEN from deleting existing edge-case tests (such as whitespace, multiple '@' symbols, consecutive dots, or tab/newline characters).
+                   - REGRESSION DEFENSE: Retain all valid specification edge-case tests (whitespace, multiple '@', consecutive dots).
+                     * In Java: test spaces, tabs, and newlines in String parameters.
+                     * In Vue / DOM component tests: HTML single-line `<input>` elements automatically strip newlines (`\\n`) per the HTML standard. Test whitespace with spaces (' ') or tabs ('\\t'), or test pure validation functions directly for '\\n'. Never write a component DOM test expecting `<input>` to preserve '\\n'.
                    - Tests must assert the TRUE expected behavior according to the API contract (e.g. valid inputs are valid, invalid inputs return the specific errors defined in api.md).
                    - NEVER assert exact error counts or list sizes (e.g. NEVER use `assertEquals(3, errors.size())` or `hasSize(3)`). Multiple validation rules can trigger simultaneously.
-                     Instead, assert: `assertFalse(result.isValid());` and verify the expected error messages/objects exist.
+                   - In Vue 3: Extract pure validation logic into `src/utils/validation.ts` and test it directly in Vitest.
+                     NEVER expose internal validation functions via `defineExpose` purely to satisfy tests! Component tests must test through props, emits, and DOM interactions.
+                   - In Vue / TypeScript:
+                     * In DOM component projects, do NOT build fragile standalone JSDOM Node CLI scripts with manual global window patching. Put component tests into `tests/unit/*.spec.ts` using Vitest.
+                     * If a Robot acceptance test executes a test runner via Process, execute Vitest directly (`npx vitest run ...`) or verify component contract expectations cleanly.
+                     For Java, assert: `assertFalse(result.isValid());`. For Vue, assert `expect(wrapper.emitted('submit')).toBeFalsy()` or check error element visibility.
+                   - NEVER create `.py` files or custom Python libraries. NEVER import SeleniumLibrary or external pip packages in Robot tests.
                 3. Create minimal dummy production classes or stubs (with default return values or simple logic) so that the code compiles, unit tests pass, and any existing Robot Framework tests pass.
                 4. Mark all dummy/stub code with explicit comments: `// TODO: [explain why this is a dummy stub and what full implementation is needed]`.
-                5. KISS JAVA VALIDATION RULES:
+                5. KISS VALIDATION RULES:
+                   - For Java:
                    - DO NOT use complex regular expressions or escape characters (`\\d`, `\\.`, `\\\\.`). They break compiler escaping!
                    - To check digits: use `password.chars().anyMatch(Character::isDigit)`
                    - To check uppercase: use `password.chars().anyMatch(Character::isUpperCase)`
                    - To check whitespace in email or strings: use `s.chars().anyMatch(Character::isWhitespace)` to reliably catch spaces, tabs ('\\t'), and newlines ('\\n').
                    - To check single '@': verify `email.indexOf('@') >= 0 && email.indexOf('@') == email.lastIndexOf('@')`.
+                   - For Vue / TypeScript:
+                   - Use standard TypeScript checks (e.g. `!/\\d/.test(...)`, `!/[A-Z]/.test(...)`, `/\\s/.test(...)`, `email.indexOf('@') !== email.lastIndexOf('@')`).
+                   - In Vue components, use standard `<script setup lang="ts">`, reactive refs, and emit strongly typed events.
                 6. CRITICAL TOOL CALL MANDATE:
                    - You MUST use the `fileSystemWriter` tool for EVERY file you create or modify (e.g. pom.xml, classes, test classes).
                    - NEVER output Java source code or markdown code blocks in your final text response. You MUST invoke `fileSystemWriter` first.
@@ -352,8 +380,11 @@ public class AgentService {
                 2. Implement full, robust production logic meeting all requirements in `context.md` and `api.md`, replacing the dummy stubs. Strictly follow the DTO signatures specified in `api.md` (e.g. `ValidationError` fields).
                 3. Remove resolved `TODO:` comments once full production logic is implemented.
                 4. Ensure all valid unit tests and Robot Framework tests pass. If an existing unit test asserted dummy-specific behavior that contradicts api.md, you may adjust the test assertion to match the specification.
-                5. REGRESSION DEFENSE: Do NOT weaken or remove existing validation logic. Ensure whitespace checks cover all whitespace (`Character::isWhitespace`), reject multiple '@' symbols, and handle edge cases without shortcuts.
-                5. KISS JAVA VALIDATION RULES:
+                5. REGRESSION DEFENSE: Do NOT weaken or remove existing validation logic. Ensure whitespace checks cover all whitespace, reject multiple '@' symbols, and handle edge cases without shortcuts.
+                6. NEVER create `.py` files or search for Python project files (requirements.txt, pyproject.toml). Taika projects are strictly Java or Vue/TypeScript.
+                6. KISS VALIDATION RULES:
+                   - For Java: use `Character::isDigit`, `Character::isUpperCase`, `Character::isWhitespace`.
+                   - For Vue / TypeScript: use clean TypeScript expressions. In Vue `<input>`, do NOT attempt to monkey-patch DOM input sanitization; handle validation cleanly via reactive state.
                    - DO NOT use complex regular expressions or escape characters (`\\d`, `\\.`, `\\\\.`). They break compiler escaping!
                    - To check digits: use `password.chars().anyMatch(Character::isDigit)`
                    - To check uppercase: use `password.chars().anyMatch(Character::isUpperCase)`

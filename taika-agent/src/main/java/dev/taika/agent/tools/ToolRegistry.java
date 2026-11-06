@@ -66,10 +66,10 @@ public class ToolRegistry {
             return;
         }
 
-        // UNIT_TESTER and CODER only need writer and single fileReader (no internal Maven looping)
+        // UNIT_TESTER and CODER only need writer (all existing files are already assembled into prompt context)
+        // Eliminating fileReader prevents multi-turn prompt snowballing where the model re-reads already provided files.
         if (agentType == AgentType.UNIT_TESTER || agentType == AgentType.CODER) {
             toolCallbacks.add(createWriterTool(fileSystemWriter, projectPath));
-            toolCallbacks.add(createSingleFileReaderTool(fileReader, projectPath));
             return;
         }
 

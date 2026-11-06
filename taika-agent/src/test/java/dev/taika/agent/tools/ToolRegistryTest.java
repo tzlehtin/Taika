@@ -73,4 +73,11 @@ class ToolRegistryTest {
         var registry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, Path.of("."), AgentType.VALIDATOR);
         assertTrue(registry.getToolCallbacks().isEmpty());
     }
+
+    @Test
+    void shouldRegisterOnlyWriterForCoder() {
+        var registry = new ToolRegistry(fileSystemReader, fileSystemWriter, mavenExecutor, fileReader, Path.of("."), AgentType.CODER);
+        assertEquals(1, registry.getToolCallbacks().size());
+        assertEquals("fileSystemWriter", registry.getToolCallbacks().get(0).getToolDefinition().name());
+    }
 }
